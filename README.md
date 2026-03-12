@@ -44,7 +44,16 @@ npm install
 
 ### 2. Configure Environment
 
-Create or modify the `.env` file in the root directory:
+H-Claw uses template files for configuration. Copy the example files and fill in your credentials.
+
+#### API Keys & General Settings
+Copy `.env.example` to `.env` and fill in your API keys:
+
+```bash
+cp .env.example .env
+```
+
+Edit `.env`:
 
 ```env
 # AI API Keys
@@ -52,12 +61,22 @@ GEMINI_API_KEY=your_gemini_key
 OPENAI_API_KEY=your_openai_key
 
 # Fallback Order (Provider:Model)
-AI_FALLBACK_ORDER=gemini:gemini-1.5-flash,gemini:gemini-1.5-pro,chatgpt:gpt-4o
+AI_FALLBACK_ORDER=gemini:gemini-3-flash-preview,gemini:gemini-3.1-pro-preview,chatgpt:gpt-4o
 
 # Telegram (Optional)
 TELEGRAM_BOT_TOKEN=your_bot_token
 TELEGRAM_CHAT_ID=your_chat_id
 ```
+
+#### Email Configuration (Optional)
+Copy `mail_accounts.json.example` to `mail_accounts.json` and add your email accounts:
+
+```bash
+cp mail_accounts.json.example mail_accounts.json
+```
+
+> [!WARNING]
+> Never commit your `.env` or `mail_accounts.json` files. They are included in `.gitignore` by default.
 
 ### 3. Running H-Claw
 
