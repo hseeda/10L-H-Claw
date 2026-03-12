@@ -47,6 +47,7 @@ npm install
 H-Claw uses template files for configuration. Copy the example files and fill in your credentials.
 
 #### API Keys & General Settings
+
 Copy `.env.example` to `.env` and fill in your API keys:
 
 ```bash
@@ -89,14 +90,18 @@ node app.js
 ## 📱 Communication Setup
 
 ### 🟢 WhatsApp (Mandatory)
+
 H-Claw uses `whatsapp-web.js` to mirror your account.
+
 1. Run `node app.js`.
 2. A **QR Code** will appear in your terminal.
 3. Open WhatsApp on your phone → **Linked Devices** → **Link a Device**.
 4. Scan the terminal QR code. The bot is now live!
 
 ### 🔵 Telegram (Optional)
+
 Used for secondary notifications and remote orchestration.
+
 1. Message [@BotFather](https://t.me/botfather) to create a bot and get your **Token**.
 2. Message [@userinfobot](https://t.me/userinfobot) to get your **Chat ID**.
 3. Add these to your `.env` file.
@@ -107,23 +112,24 @@ Used for secondary notifications and remote orchestration.
 
 H-Claw's greatest power is its ability to **evolve**. Because it has direct access to Bash and PowerShell, it can create, test, and save new tools during a conversation.
 
-### How it Works:
-1.  **Request**: Ask for a new capability (e.g., "Add a tool to check my system's disk space and alert me if it's low").
-2.  **Creation**: The bot writes a script, validates it via the shell, and uses `tool_save` to add the recipe to `MD/TOOLS.md`.
-3.  **Persistence**: The bot now "knows" this tool and can use it in future sessions.
+### How it Works
+
+1. **Request**: Ask for a new capability (e.g., "Add a tool to check my system's disk space and alert me if it's low").
+2. **Creation**: The bot writes a script, validates it via the shell, and uses `tool_save` to add the recipe to `MD/TOOLS.md`.
+3. **Persistence**: The bot now "knows" this tool and can use it in future sessions.
 
 ### Example: Adding a System Monitor
+>
 > **User**: *"H-Claw, add a tool that uses PowerShell to check my local weather using 'wttr.in'."*
 >
 > **H-Claw**: *"I've successfully created and saved a new weather tool using `curl wttr.in?format=3`. You can now ask me for the weather anytime!"*
 
 ---
 
-## 🛠️ Tool Classification
-
-H-Claw tools are divided into three distinct categories:
+## 🛠️ Bot Tool Classification
 
 ### 1. Built-in Commands (Slash Commands)
+
 These are direct instructions you send to the bot. They are processed locally and do not require AI inference.
 
 | Command | Description |
@@ -140,7 +146,8 @@ These are direct instructions you send to the bot. They are processed locally an
 | `/print` | Debug: Print internal model variables to console |
 | `/stop` | Gracefully shut down the server |
 
-### 2. AI Tools (Hardcoded Capabilities)
+### 2. Built-in AI Tools (Hardcoded Capabilities)
+
 These are specialized functions the AI can "choose" to use based on your request. They are defined in `aiTools.js`.
 
 - **Shell Tools**: `execute_bash`, `execute_powershell` (Execute system commands).
@@ -152,6 +159,7 @@ These are specialized functions the AI can "choose" to use based on your request
 - **System**: `tool_save` (Saves "Learned Tools" to `TOOLS.md`).
 
 ### 3. Learned Tools (Dynamic Recipes)
+
 These are "recipes" or complex workflows stored in `MD/TOOLS.md`. The AI consults this file to learn how to perform non-native tasks.
 
 - **OS Rules**: Context on when to use PowerShell vs Bash.
