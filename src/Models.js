@@ -1,5 +1,3 @@
-require("dotenv").config();
-
 function getAvailableModels() {
     return process.env.AI_FALLBACK_ORDER.split(',');
 }

@@ -1,6 +1,5 @@
 const { GoogleGenAI } = require("@google/genai");
 const OpenAI = require("openai");
-require("dotenv").config();
 const { getActiveModel, getAvailableModels, activeModelFallback} = require ('./Models');
 const { GEMINI_TOOLS, OPENAI_TOOLS, executeTool } = require('./aiTools');
 

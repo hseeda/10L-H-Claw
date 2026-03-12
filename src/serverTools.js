@@ -9,10 +9,12 @@ async function stopServer() {
     // 2. Telegram Notification (Independent)
     if (process.env.TELEGRAM_BOT_TOKEN && process.env.TELEGRAM_CHAT_ID) {
         try {
-            const { getTelegramClient } = require('./telegramClient');
-            const tg = getTelegramClient();
-            if (tg) {
-                await tg.sendTelegramMessage(process.env.TELEGRAM_CHAT_ID, '🐾 *H-Claw stopped!* 🛑');
+            const { getTelegramClient, isTelegramActive } = require('./telegramClient');
+            if (isTelegramActive()) {
+                const tg = getTelegramClient();
+                if (tg) {
+                    await tg.sendTelegramMessage(process.env.TELEGRAM_CHAT_ID, '🐾 *H-Claw stopped!* 🛑');
+                }
             }
         } catch (tErr) {
             console.error('Failed to send Telegram stop message:', tErr.message);

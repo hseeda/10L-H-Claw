@@ -226,10 +226,12 @@ function initializeWhatsAppClient() {
             // Telegram Notification
             if (process.env.TELEGRAM_CHAT_ID) {
                 try {
-                    const { getTelegramClient } = require('./telegramClient');
-                    const tg = getTelegramClient();
-                    if (tg) {
-                        await tg.sendTelegramMessage(process.env.TELEGRAM_CHAT_ID, '🐾 *H-Claw started!* ✨');
+                    const { getTelegramClient, isTelegramActive } = require('./telegramClient');
+                    if (isTelegramActive()) {
+                        const tg = getTelegramClient();
+                        if (tg) {
+                            await tg.sendTelegramMessage(process.env.TELEGRAM_CHAT_ID, '🐾 *H-Claw started!* ✨');
+                        }
                     }
                 } catch (tErr) {
                     console.error('Failed to send Telegram start message:', tErr.message);

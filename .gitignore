@@ -8,5 +8,7 @@ tmp/
 .gitignore
 secrets/.env
 secrets/mail_accounts.json
+secrets/.env1
+secrets/mail_accounts.json1
 MD/MEMORY.MD
 MD/TOOLS.MD

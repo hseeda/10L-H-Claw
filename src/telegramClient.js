@@ -1,6 +1,5 @@
 const fs = require('fs');
 const path = require('path');
-require('dotenv').config();
 // aiHandler is lazy-loaded in initializeTelegramBot to avoid circular dependency
 const { getActiveModel, getAvailableModels, getCurrentModelInfo, getAvailableModelsList, resetToDefaultModel, switchModelByNumber } = require('./Models');
 
@@ -215,7 +214,7 @@ const tgClient = {
             if (!data.ok) throw new Error(data.description || 'Failed to fetch Telegram updates');
             return data;
         } catch (error) {
-            console.error('Error fetching Telegram updates:', error.message);
+            console.warn('⚠️  Telegram will not be used:', error.message);
             throw error;
         }
     },
@@ -386,6 +385,10 @@ function getTelegramClient() {
     return botInstance;
 }
 
+function isTelegramActive() {
+    return isPolling;
+}
+
 async function initializeTelegramClient(whatsappClient = null) {
     const token = process.env.TELEGRAM_BOT_TOKEN;
     if (!token || token === 'your_bot_token_here') {
@@ -397,12 +400,9 @@ async function initializeTelegramClient(whatsappClient = null) {
         console.log('ℹ️ Telegram polling is already running.');
         return;
     }
-    isPolling = true;
-
-    console.log('📡 Telegram Polling started... 🚀');
     let lastUpdateId = 0;
 
-    // Initial check to clear old messages or get starting point
+    // Validate token with Telegram before starting to poll
     try {
         const initial = await tgClient.getTelegramUpdates(0, 1);
         if (initial.result.length > 0) {
@@ -410,8 +410,14 @@ async function initializeTelegramClient(whatsappClient = null) {
             console.log(`ℹ️ Telegram skipping old messages (last ID: ${lastUpdateId})`);
         }
     } catch (err) {
+        if (err.message.includes('Not Found') || err.message.includes('Unauthorized')) {
+            return;
+        }
         console.error('Failed to initialize Telegram polling offset:', err.message);
     }
+
+    isPolling = true;
+    console.log('📡 Telegram Polling started... 🚀');
 
     const telegramHistory = {}; // Store history per chat ID
 
@@ -523,6 +529,10 @@ async function initializeTelegramClient(whatsappClient = null) {
                 setTimeout(poll, 10000);
                 return;
             }
+            if (err.message.includes('Not Found') || err.message.includes('Unauthorized')) {
+                isPolling = false;
+                return;
+            }
         }
         setTimeout(poll, 3000);
     }
@@ -532,6 +542,7 @@ async function initializeTelegramClient(whatsappClient = null) {
 
 module.exports = {
     initializeTelegramClient,
-    getTelegramClient
+    getTelegramClient,
+    isTelegramActive
 };
 
