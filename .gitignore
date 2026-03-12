@@ -6,3 +6,7 @@ mail_accounts.json
 *.log
 tmp/
 .gitignore
+secrets/.env
+secrets/mail_accounts.json
+MD/MEMORY.MD
+MD/TOOLS.MD
