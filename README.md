@@ -69,11 +69,11 @@ TELEGRAM_CHAT_ID=your_chat_id
 ```
 
 #### Email Configuration (Optional)
-Copy `mail_accounts.json.example` to `mail_accounts.json` and add your email accounts:
 
-```bash
-cp mail_accounts.json.example mail_accounts.json
-```
+You can configure email accounts manually or **directly through conversation** with the bot:
+
+- **Manual**: Copy `mail_accounts.json.example` to `mail_accounts.json` and edit.
+- **Bot-Assisted**: Simply tell the bot: *"H-Claw, I want to add my Gmail account. Use these settings: [host, port, user, pass...]"*. The bot will use its file system tools to update your `mail_accounts.json` automatically.
 
 > [!WARNING]
 > Never commit your `.env` or `mail_accounts.json` files. They are included in `.gitignore` by default.
@@ -84,7 +84,38 @@ cp mail_accounts.json.example mail_accounts.json
 node app.js
 ```
 
-Scan the QR code printed in the terminal with your WhatsApp mobile app (Linked Devices) to authenticate.
+---
+
+## 📱 Communication Setup
+
+### 🟢 WhatsApp (Mandatory)
+H-Claw uses `whatsapp-web.js` to mirror your account.
+1. Run `node app.js`.
+2. A **QR Code** will appear in your terminal.
+3. Open WhatsApp on your phone → **Linked Devices** → **Link a Device**.
+4. Scan the terminal QR code. The bot is now live!
+
+### 🔵 Telegram (Optional)
+Used for secondary notifications and remote orchestration.
+1. Message [@BotFather](https://t.me/botfather) to create a bot and get your **Token**.
+2. Message [@userinfobot](https://t.me/userinfobot) to get your **Chat ID**.
+3. Add these to your `.env` file.
+
+---
+
+## 🚀 Dynamic Expansion (Core Capability)
+
+H-Claw's greatest power is its ability to **evolve**. Because it has direct access to Bash and PowerShell, it can create, test, and save new tools during a conversation.
+
+### How it Works:
+1.  **Request**: Ask for a new capability (e.g., "Add a tool to check my system's disk space and alert me if it's low").
+2.  **Creation**: The bot writes a script, validates it via the shell, and uses `tool_save` to add the recipe to `MD/TOOLS.md`.
+3.  **Persistence**: The bot now "knows" this tool and can use it in future sessions.
+
+### Example: Adding a System Monitor
+> **User**: *"H-Claw, add a tool that uses PowerShell to check my local weather using 'wttr.in'."*
+>
+> **H-Claw**: *"I've successfully created and saved a new weather tool using `curl wttr.in?format=3`. You can now ask me for the weather anytime!"*
 
 ---
 
