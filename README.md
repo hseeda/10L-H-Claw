@@ -8,6 +8,26 @@
 
 **H-Claw** is a premium, personal AI assistant that lives inside your WhatsApp. Built with a "Note to Self" philosophy, it serves as a powerful bridge between your messaging app and cutting-edge AI models, persistent memory, and local system tools.
 
+## 🏗️ Project Structure
+
+```text
+├── hclaw.js                # Main application entry point
+├── src/                    # Source code directory
+│   ├── Models.js           # AI Model configuration
+│   ├── aiHandler.js        # AI message processing logic
+│   ├── aiTools.js          # Tool definitions for AI
+│   ├── mailTools.js        # Email management
+│   ├── serverTools.js      # Server utility tools
+│   ├── telegramClient.js   # Telegram bot integration
+│   └── whatsappClient.js   # WhatsApp bot integration
+├── secrets/                # Configuration and secret files
+│   ├── .env                # Environment variables
+│   └── mail_accounts.json  # Email account configurations
+├── MD/                     # AI Context files (Soul, Tools, Memory)
+├── assets/                 # Static assets
+└── tmp/                    # Temporary files
+```
+
 ---
 
 ## ✨ Key Features
@@ -82,7 +102,7 @@ You can configure email accounts manually or **directly through conversation** w
 ### 3. Running H-Claw
 
 ```bash
-node app.js
+node hclaw.js
 ```
 
 ---
@@ -93,7 +113,7 @@ node app.js
 
 H-Claw uses `whatsapp-web.js` to mirror your account.
 
-1. Run `node app.js`.
+1. Run `node hclaw.js`.
 2. A **QR Code** will appear in your terminal.
 3. Open WhatsApp on your phone → **Linked Devices** → **Link a Device**.
 4. Scan the terminal QR code. The bot is now live!
@@ -163,8 +183,10 @@ These are specialized functions the AI can "choose" to use based on your request
 These are "recipes" or complex workflows stored in `MD/TOOLS.md`. The AI consults this file to learn how to perform non-native tasks.
 
 - **OS Rules**: Context on when to use PowerShell vs Bash.
+- **YouTube Access**: Using `yt-dlp` to download audio or fetch video metadata directly from a URL.
 - **Web Reader**: How to use `lynx` or `links` to scrape websites.
 - **PC Alerts**: Commands for native OS notifications (e.g., `BurntToast` for Windows).
+- **Crypto Tracking**: Scripts to fetch real-time prices from public APIs like CoinGecko.
 - **Custom Workflows**: Any routine the AI has been taught to automate.
 
 ---

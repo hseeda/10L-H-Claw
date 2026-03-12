@@ -13,9 +13,9 @@ let cumulativeTotalTokens = 0;
 const fs   = require('fs');
 const path = require('path');
 
-const memoryPath = path.join(__dirname, 'MD', 'MEMORY.md');
-const toolsPath  = path.join(__dirname, 'MD', 'TOOLS.md');
-const soulPath   = path.join(__dirname, 'MD', 'SOUL.md');
+const memoryPath = path.join(__dirname, '..', 'MD', 'MEMORY.md');
+const toolsPath  = path.join(__dirname, '..', 'MD', 'TOOLS.md');
+const soulPath   = path.join(__dirname, '..', 'MD', 'SOUL.md');
 
 const BASE_SYSTEM_PROMPT =
   "You are an AI assistant named H-Claw. Keep your answers helpful and concise.";

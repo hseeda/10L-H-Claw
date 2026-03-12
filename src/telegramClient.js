@@ -427,7 +427,7 @@ async function initializeTelegramClient(whatsappClient = null) {
                 // Handle Media Reception
                 let mediaInfo = null;
                 if (msg.photo || msg.voice || msg.audio || msg.document) {
-                    const tmpDir = path.join(__dirname, 'tmp');
+                    const tmpDir = path.join(__dirname, '..', 'tmp');
                     if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
 
                     let fileId = null;

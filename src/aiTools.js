@@ -5,7 +5,7 @@ const { MessageMedia } = require("whatsapp-web.js");
 const OpenAI = require("openai");
 const { GoogleGenAI } = require("@google/genai");
 require("dotenv").config();
-const mailManager = require("./mail");
+const mailManager = require("./mailTools");
 // telegramManager is lazy-loaded in executeTool to avoid circular dependency with aiHandler
 
 // Local Instances for internal AI perception/generation

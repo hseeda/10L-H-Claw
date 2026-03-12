@@ -4,7 +4,7 @@ const { simpleParser } = require("mailparser");
 const fs = require("fs");
 const path = require("path");
 
-const ACCOUNTS_FILE = path.join(__dirname, "mail_accounts.json");
+const ACCOUNTS_FILE = path.join(__dirname, "..", "secrets", "mail_accounts.json");
 
 class MailManager {
   constructor() {
@@ -175,7 +175,7 @@ class MailManager {
         };
 
         if (downloadAttachments && parsed.attachments.length > 0) {
-          const tempDir = path.join(__dirname, "tmp");
+          const tempDir = path.join(__dirname, "..", "tmp");
           if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir);
           
           result.downloadedAttachments = parsed.attachments.map(att => {

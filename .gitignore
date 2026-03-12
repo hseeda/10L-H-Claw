@@ -5,3 +5,4 @@ node_modules/
 mail_accounts.json
 *.log
 tmp/
+.gitignore
