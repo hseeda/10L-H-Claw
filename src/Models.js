@@ -85,50 +85,45 @@ function activeModelFallback(){
     else model.set(0);
 }
 
+function providerEmoji(provider) {
+    if (provider === 'gemini') return '💎';
+    if (provider === 'openai' || provider === 'chatgpt') return '🤖';
+    if (provider === 'anthropic' || provider === 'claude') return '🧠';
+    return '🤔';
+}
+
 function getCurrentModelInfo() {
-    const model = getActiveModel();
-    const models = getAvailableModels();
-    const activeModelNumber = model.number;
-    const currentModelEntry = models[activeModelNumber - 1] || models[0];
-    const provider = model.provider;
-    const emoji = provider === 'gemini' ? '✨' : (provider === 'chatgpt' || provider === 'openai') ? '🧠' : '🤔';
-    return `ℹ️ *Current Active Model:*\n${emoji} \`${currentModelEntry}\` (Model #${activeModelNumber})`;
+    const m = getActiveModel();
+    const entry = getAvailableModels()[m.number - 1] || getAvailableModels()[0];
+    return `${providerEmoji(m.provider)} *Active:* \`${entry}\` (#${m.number})`;
 }
 
 function getAvailableModelsList() {
     const models = getAvailableModels();
-    const model = getActiveModel();
-    const activeModelNumber = model.number;
-
-    let reply = "ℹ️ *Available AI Models:*\n";
-    models.forEach((m, idx) => {
-        const provider = m.split(':')[0].toLowerCase();
-        const emoji = provider === 'gemini' ? '✨' : (provider === 'chatgpt' || provider === 'openai') ? '🧠' : '🤔';
-        const indicator = (idx + 1) === activeModelNumber ? " 🎯 *(Current)*" : "";
-        reply += `${idx + 1}. ${emoji} \`${m}\`${indicator}\n`;
+    const active = getActiveModel().number;
+    let r = '📋 *Models:*\n';
+    models.forEach((m, i) => {
+        const p = m.split(':')[0].toLowerCase();
+        const tag = (i + 1) === active ? ' 🎯' : '';
+        r += `${i + 1}. ${providerEmoji(p)} \`${m}\`${tag}\n`;
     });
-    return reply;
+    return r;
 }
 
 function resetToDefaultModel() {
-    const model = getActiveModel();
-    model.set(1);
-    return `ℹ️*Model Reset!*♻️\nusing model \`${model.model}\``;
+    const m = getActiveModel();
+    m.set(1);
+    return `♻️ *Reset:* \`${m.model}\``;
 }
 
 function switchModelByNumber(targetNum) {
     const models = getAvailableModels();
-    const model = getActiveModel();
-    
+    const m = getActiveModel();
     if (!isNaN(targetNum) && targetNum > 0 && targetNum <= models.length) {
-        model.set(targetNum);
-        const activeModelName = model.model;
-        const provider = model.provider;
-        const emoji = provider === 'gemini' ? '✨' : (provider === 'chatgpt' || provider === 'openai') ? '🧠' : '🤔';
-        return `ℹ️*Model Switched Successfully!*✅\n\nI am now exclusively using:\n${emoji} \`${activeModelName}\``;
-    } else {
-        return `ℹ️*Error:* ❌ Model number \`${targetNum}\` not found in the available list. Use \`/list models\` to see options.`;
+        m.set(targetNum);
+        return `✅ *Switched:* ${providerEmoji(m.provider)} \`${m.model}\``;
     }
+    return `❌ Model #${targetNum} not found. Use \`/list models\``;
 }
 
 function printModelVariables() {

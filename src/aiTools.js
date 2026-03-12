@@ -15,15 +15,10 @@ let fileManager = null;
 try {
   if (process.env.OPENAI_API_KEY) {
     internalOpenAI = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-  } else {
-    console.warn("⚠️  OPENAI_API_KEY not found in environment.");
   }
-  
   if (process.env.GEMINI_API_KEY) {
     geminiToolClient = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
     fileManager = geminiToolClient.files;
-  } else {
-    console.warn("⚠️  GEMINI_API_KEY not found in environment.");
   }
 } catch (e) {
   console.error("❌ Error initializing AI clients in aiTools.js:", e.message);
@@ -73,448 +68,58 @@ function wipeTmpDirectory() {
 
 // ─── Tool Schemas ──────────────────────────────────────────────────────────────
 
+const P = (props, req) => ({ type: "OBJECT", properties: props, required: req });
+const S = (d) => ({ type: "STRING", description: d });
+const I = (d) => ({ type: "INTEGER", description: d });
+const B = (d) => ({ type: "BOOLEAN", description: d });
+
 const customToolsSchema = [
-  // --- SHELL TOOLS ---
-  {
-    name: "execute_bash",
-    description: "Run bash/sh command and get output.",
-    parameters: {
-      type: "OBJECT",
-      properties: {
-        command: {
-          type: "STRING",
-          description: "Command to run.",
-        },
-      },
-      required: ["command"],
-    },
-  },
-  {
-    name: "execute_powershell",
-    description: "Run PowerShell (pwsh) command and get output.",
-    parameters: {
-      type: "OBJECT",
-      properties: {
-        command: {
-          type: "STRING",
-          description: "Command to run.",
-        },
-      },
-      required: ["command"],
-    },
-  },
-  // --- MEMORY TOOLS ---
-  {
-    name: "memory_list",
-    description: "List saved memory facts.",
-  },
-  {
-    name: "memory_add",
-    description: "Add a raw fact to memory.",
-    parameters: {
-      type: "OBJECT",
-      properties: {
-        fact: { type: "STRING", description: "Concise fact." },
-      },
-      required: ["fact"],
-    },
-  },
-  {
-    name: "memory_add_media",
-    description: "Save a visual/audio entry in memory.",
-    parameters: {
-      type: "OBJECT",
-      properties: {
-        file_path: {
-          type: "STRING",
-          description: "Absolute file path.",
-        },
-        description: {
-          type: "STRING",
-          description: "What this media represents.",
-        },
-      },
-      required: ["file_path", "description"],
-    },
-  },
-  {
-    name: "memory_remove",
-    description: "Remove fact by 1-based index.",
-    parameters: {
-      type: "OBJECT",
-      properties: {
-        index: {
-          type: "INTEGER",
-          description: "1-based index.",
-        },
-      },
-      required: ["index"],
-    },
-  },
-  {
-    name: "memory_edit",
-    description: "Edit fact by 1-based index.",
-    parameters: {
-      type: "OBJECT",
-      properties: {
-        index: { type: "INTEGER", description: "1-based index." },
-        new_fact: { type: "STRING", description: "Updated fact." },
-      },
-      required: ["index", "new_fact"],
-    },
-  },
-  {
-    name: "memory_clear",
-    description: "Clear all memory facts.",
-  },
-  // --- FILE SYSTEM TOOLS ---
-  {
-    name: "file_read",
-    description: "Read text file.",
-    parameters: {
-      type: "OBJECT",
-      properties: {
-        file_path: { type: "STRING", description: "Absolute path." },
-      },
-      required: ["file_path"],
-    },
-  },
-  {
-    name: "file_write",
-    description: "Write/overwrite file.",
-    parameters: {
-      type: "OBJECT",
-      properties: {
-        file_path: { type: "STRING", description: "Absolute path." },
-        content: { type: "STRING", description: "Text content." },
-      },
-      required: ["file_path", "content"],
-    },
-  },
-  {
-    name: "file_append",
-    description: "Append text to file.",
-    parameters: {
-      type: "OBJECT",
-      properties: {
-        file_path: { type: "STRING", description: "Absolute path." },
-        content: { type: "STRING", description: "Text to append." },
-      },
-      required: ["file_path", "content"],
-    },
-  },
-  {
-    name: "file_list",
-    description: "List directory contents.",
-    parameters: {
-      type: "OBJECT",
-      properties: {
-        dir_path: { type: "STRING", description: "Absolute path." },
-      },
-      required: ["dir_path"],
-    },
-  },
-  // --- SYSTEM TOOLS ---
-  {
-    name: "tool_save",
-    description: "Save new tool/workflow to ./MD/TOOLS.md.",
-    parameters: {
-      type: "OBJECT",
-      properties: {
-        tool_content: { type: "STRING", description: "Documentation or script." },
-      },
-      required: ["tool_content"],
-    },
-  },
-  // --- WHATSAPP TEXT TOOLS ---
-  {
-    name: "whatsapp_send",
-    description: "Send WhatsApp text.",
-    parameters: {
-      type: "OBJECT",
-      properties: {
-        target_id: { type: "STRING", description: "Phone number (000...)." },
-        message: { type: "STRING", description: "Text message." },
-      },
-      required: ["target_id", "message"],
-    },
-  },
-  {
-    name: "whatsapp_list_recent",
-    description: "Get recent WhatsApp history.",
-    parameters: {
-      type: "OBJECT",
-      properties: {
-        target_id: { type: "STRING", description: "Phone number." },
-        limit: { type: "INTEGER", description: "Max count (default 10)." },
-      },
-      required: ["target_id"],
-    },
-  },
-  {
-    name: "whatsapp_list_contacts",
-    description: "List/Search WhatsApp contacts.",
-    parameters: {
-      type: "OBJECT",
-      properties: {
-        query: { type: "STRING", description: "Search term." },
-      },
-    },
-  },
-  {
-    name: "whatsapp_reply",
-    description: "Reply to specific message ID.",
-    parameters: {
-      type: "OBJECT",
-      properties: {
-        message_id: { type: "STRING", description: "ID to reply to." },
-        message: { type: "STRING", description: "Reply text." },
-      },
-      required: ["message_id", "message"],
-    },
-  },
-  // --- WHATSAPP MEDIA TOOLS ---
-  {
-    name: "generate_image",
-    description: "Generate image with DALL-E 3 (requires visual prompt).",
-    parameters: {
-      type: "OBJECT",
-      properties: {
-        prompt: { type: "STRING", description: "Visual prompt." },
-        save_as_fact: { type: "BOOLEAN", description: "Save as memory fact." },
-      },
-      required: ["prompt"],
-    },
-  },
-  {
-    name: "generate_audio",
-    description: "Convert text to audio (TTS-1).",
-    parameters: {
-      type: "OBJECT",
-      properties: {
-        text: { type: "STRING", description: "Text to speak." },
-        voice: { type: "STRING", description: "Voice: alloy, echo, fable, onyx, nova, shimmer." },
-      },
-      required: ["text", "voice"],
-    },
-  },
-  {
-    name: "whatsapp_send_media",
-    description: "Send file/media to WhatsApp.",
-    parameters: {
-      type: "OBJECT",
-      properties: {
-        target_id: { type: "STRING", description: "Phone number." },
-        file_path: { type: "STRING", description: "Absolute path." },
-        caption: { type: "STRING", description: "Optional caption." },
-      },
-      required: ["target_id", "file_path"],
-    },
-  },
-  {
-    name: "whatsapp_read_media",
-    description: "Understand/transcribe WhatsApp media via AI.",
-    parameters: {
-      type: "OBJECT",
-      properties: {
-        message_id: { type: "STRING", description: "Message ID." },
-      },
-      required: ["message_id"],
-    },
-  },
-  {
-    name: "whatsapp_download_media",
-    description: "Download WhatsApp media to tmp.",
-    parameters: {
-      type: "OBJECT",
-      properties: {
-        message_id: { type: "STRING", description: "Message ID." },
-        filename: { type: "STRING", description: "Optional filename." },
-      },
-      required: ["message_id"],
-    },
-  },
-  // --- MAIL TOOLS ---
-  {
-    name: "mail_add_account",
-    description: "Add SMTP/IMAP account.",
-    parameters: {
-      type: "OBJECT",
-      properties: {
-        name: { type: "STRING", description: "Account name." },
-        host: { type: "STRING", description: "Server host." },
-        port: { type: "INTEGER", description: "Port." },
-        secure: { type: "BOOLEAN", description: "Use SSL/TLS." },
-        user: { type: "STRING", description: "Username/Email." },
-        pass: { type: "STRING", description: "Password." },
-        type: { type: "STRING", description: "Account type ('smtp' or 'imap')." },
-      },
-      required: ["name", "host", "port", "secure", "user", "pass", "type"],
-    },
-  },
-  {
-    name: "mail_list_accounts",
-    description: "List configured mail accounts.",
-  },
-  {
-    name: "mail_send_email",
-    description: "Send email via SMTP.",
-    parameters: {
-      type: "OBJECT",
-      properties: {
-        account_name: { type: "STRING", description: "Account name." },
-        to: { type: "STRING", description: "Recipient." },
-        subject: { type: "STRING", description: "Subject." },
-        body: { type: "STRING", description: "Text body." },
-        html: { type: "STRING", description: "Optional HTML." },
-      },
-      required: ["account_name", "to", "subject", "body"],
-    },
-  },
-  {
-    name: "mail_list_folders",
-    description: "List IMAP folders.",
-    parameters: {
-      type: "OBJECT",
-      properties: {
-        account_name: { type: "STRING", description: "Account name." },
-      },
-      required: ["account_name"],
-    },
-  },
-  {
-    name: "mail_list_messages",
-    description: "List recent emails (meta only).",
-    parameters: {
-      type: "OBJECT",
-      properties: {
-        account_name: { type: "STRING", description: "Account name." },
-        folder: { type: "STRING", description: "Folder (default 'INBOX')." },
-        limit: { type: "INTEGER", description: "Limit (default 10)." },
-      },
-      required: ["account_name"],
-    },
-  },
-  {
-    name: "mail_list_messages_all",
-    description: "List recent emails including full text body.",
-    parameters: {
-      type: "OBJECT",
-      properties: {
-        account_name: { type: "STRING", description: "Account name." },
-        folder: { type: "STRING", description: "Folder (default 'INBOX')." },
-        limit: { type: "INTEGER", description: "Limit (default 10)." },
-      },
-      required: ["account_name"],
-    },
-  },
-  {
-    name: "mail_get_message",
-    description: "Get full email content/attachments.",
-    parameters: {
-      type: "OBJECT",
-      properties: {
-        account_name: { type: "STRING", description: "Account name." },
-        uid: { type: "STRING", description: "Email UID." },
-        folder: { type: "STRING", description: "Folder." },
-        download_attachments: { type: "BOOLEAN", description: "Download attachments." },
-      },
-      required: ["account_name", "uid"],
-    },
-  },
-  {
-    name: "mail_delete_message",
-    description: "Delete an email.",
-    parameters: {
-      type: "OBJECT",
-      properties: {
-        account_name: { type: "STRING", description: "Account name." },
-        uid: { type: "STRING", description: "Email UID." },
-        folder: { type: "STRING", description: "Folder." },
-      },
-      required: ["account_name", "uid"],
-    },
-  },
-  {
-    name: "mail_move_message",
-    description: "Move email to another folder.",
-    parameters: {
-      type: "OBJECT",
-      properties: {
-        account_name: { type: "STRING", description: "Account name." },
-        uid: { type: "STRING", description: "Email UID." },
-        target_folder: { type: "STRING", description: "Target folder." },
-        source_folder: { type: "STRING", description: "Source folder." },
-      },
-      required: ["account_name", "uid", "target_folder"],
-    },
-  },
-  // --- TELEGRAM TOOLS ---
-  {
-    name: "telegram_send",
-    description: "Send Telegram message.",
-    parameters: {
-      type: "OBJECT",
-      properties: {
-        chat_id: { type: "STRING", description: "Chat ID." },
-        message: { type: "STRING", description: "Text message." },
-      },
-      required: ["chat_id", "message"],
-    },
-  },
-  {
-    name: "telegram_list_recent",
-    description: "Get recent Telegram updates.",
-    parameters: {
-      type: "OBJECT",
-      properties: {
-        offset: { type: "INTEGER", description: "Offset ID." },
-        limit: { type: "INTEGER", description: "Max updates (max 100)." },
-      },
-    },
-  },
-  {
-    name: "telegram_delete",
-    description: "Delete Telegram message.",
-    parameters: {
-      type: "OBJECT",
-      properties: {
-        chat_id: { type: "STRING", description: "Chat ID." },
-        message_id: { type: "INTEGER", description: "Message ID." },
-      },
-      required: ["chat_id", "message_id"],
-    },
-  },
-  {
-    name: "telegram_send_media",
-    description: "Send file/media to Telegram.",
-    parameters: {
-      type: "OBJECT",
-      properties: {
-        chat_id: { type: "STRING", description: "Chat ID." },
-        file_path: { type: "STRING", description: "Absolute path." },
-        caption: { type: "STRING", description: "Optional caption." },
-      },
-      required: ["chat_id", "file_path"],
-    },
-  },
-  {
-    name: "telegram_read_media",
-    description: "Understand/transcribe Telegram media via AI.",
-    parameters: {
-      type: "OBJECT",
-      properties: {
-        chat_id: { type: "STRING", description: "Chat ID." },
-        message_id: { type: "INTEGER", description: "Message ID." },
-      },
-      required: ["chat_id", "message_id"],
-    },
-  },
-  // --- SERVER TOOLS ---
-  {
-    name: "server_stop",
-    description: "Gracefully shut down H-Claw.",
-  },
+  // Shell
+  { name: "execute_bash", description: "Run bash command.", parameters: P({ command: S("Command") }, ["command"]) },
+  { name: "execute_powershell", description: "Run PowerShell command.", parameters: P({ command: S("Command") }, ["command"]) },
+  // Memory
+  { name: "memory_list", description: "List memory facts." },
+  { name: "memory_add", description: "Add fact to memory.", parameters: P({ fact: S("Fact") }, ["fact"]) },
+  { name: "memory_add_media", description: "Save media to memory.", parameters: P({ file_path: S("Path"), description: S("Description") }, ["file_path", "description"]) },
+  { name: "memory_remove", description: "Remove fact by index.", parameters: P({ index: I("1-based index") }, ["index"]) },
+  { name: "memory_edit", description: "Edit fact by index.", parameters: P({ index: I("1-based index"), new_fact: S("New fact") }, ["index", "new_fact"]) },
+  { name: "memory_clear", description: "Clear all memory." },
+  // File system
+  { name: "file_read", description: "Read file.", parameters: P({ file_path: S("Path") }, ["file_path"]) },
+  { name: "file_write", description: "Write file.", parameters: P({ file_path: S("Path"), content: S("Content") }, ["file_path", "content"]) },
+  { name: "file_append", description: "Append to file.", parameters: P({ file_path: S("Path"), content: S("Text") }, ["file_path", "content"]) },
+  { name: "file_list", description: "List directory.", parameters: P({ dir_path: S("Path") }, ["dir_path"]) },
+  // System
+  { name: "tool_save", description: "Save tool to TOOLS.md.", parameters: P({ tool_content: S("Content") }, ["tool_content"]) },
+  // WhatsApp
+  { name: "whatsapp_send", description: "Send WhatsApp text.", parameters: P({ target_id: S("Phone"), message: S("Text") }, ["target_id", "message"]) },
+  { name: "whatsapp_list_recent", description: "Get WhatsApp history.", parameters: P({ target_id: S("Phone"), limit: I("Max count") }, ["target_id"]) },
+  { name: "whatsapp_list_contacts", description: "Search WhatsApp contacts.", parameters: P({ query: S("Search term") }) },
+  { name: "whatsapp_reply", description: "Reply to message.", parameters: P({ message_id: S("Msg ID"), message: S("Reply") }, ["message_id", "message"]) },
+  // Media generation
+  { name: "generate_image", description: "Generate DALL-E 3 image.", parameters: P({ prompt: S("Visual prompt"), save_as_fact: B("Save to memory") }, ["prompt"]) },
+  { name: "generate_audio", description: "Text to speech.", parameters: P({ text: S("Text"), voice: S("alloy|echo|fable|onyx|nova|shimmer") }, ["text", "voice"]) },
+  { name: "whatsapp_send_media", description: "Send media via WhatsApp.", parameters: P({ target_id: S("Phone"), file_path: S("Path"), caption: S("Caption") }, ["target_id", "file_path"]) },
+  { name: "whatsapp_read_media", description: "AI-read WhatsApp media.", parameters: P({ message_id: S("Msg ID") }, ["message_id"]) },
+  { name: "whatsapp_download_media", description: "Download WhatsApp media.", parameters: P({ message_id: S("Msg ID"), filename: S("Filename") }, ["message_id"]) },
+  // Mail
+  { name: "mail_add_account", description: "Add mail account.", parameters: P({ name: S("Name"), host: S("Host"), port: I("Port"), secure: B("SSL"), user: S("User"), pass: S("Pass"), type: S("smtp|imap") }, ["name", "host", "port", "secure", "user", "pass", "type"]) },
+  { name: "mail_list_accounts", description: "List mail accounts." },
+  { name: "mail_send_email", description: "Send email.", parameters: P({ account_name: S("Account"), to: S("To"), subject: S("Subject"), body: S("Body"), html: S("HTML") }, ["account_name", "to", "subject", "body"]) },
+  { name: "mail_list_folders", description: "List IMAP folders.", parameters: P({ account_name: S("Account") }, ["account_name"]) },
+  { name: "mail_list_messages", description: "List emails (meta).", parameters: P({ account_name: S("Account"), folder: S("Folder"), limit: I("Limit") }, ["account_name"]) },
+  { name: "mail_list_messages_all", description: "List emails (full).", parameters: P({ account_name: S("Account"), folder: S("Folder"), limit: I("Limit") }, ["account_name"]) },
+  { name: "mail_get_message", description: "Get email.", parameters: P({ account_name: S("Account"), uid: S("UID"), folder: S("Folder"), download_attachments: B("Download") }, ["account_name", "uid"]) },
+  { name: "mail_delete_message", description: "Delete email.", parameters: P({ account_name: S("Account"), uid: S("UID"), folder: S("Folder") }, ["account_name", "uid"]) },
+  { name: "mail_move_message", description: "Move email.", parameters: P({ account_name: S("Account"), uid: S("UID"), target_folder: S("Target"), source_folder: S("Source") }, ["account_name", "uid", "target_folder"]) },
+  // Telegram
+  { name: "telegram_send", description: "Send Telegram message.", parameters: P({ chat_id: S("Chat ID"), message: S("Text") }, ["chat_id", "message"]) },
+  { name: "telegram_list_recent", description: "Get Telegram updates.", parameters: P({ offset: I("Offset"), limit: I("Limit") }) },
+  { name: "telegram_delete", description: "Delete Telegram message.", parameters: P({ chat_id: S("Chat ID"), message_id: I("Msg ID") }, ["chat_id", "message_id"]) },
+  { name: "telegram_send_media", description: "Send Telegram media.", parameters: P({ chat_id: S("Chat ID"), file_path: S("Path"), caption: S("Caption") }, ["chat_id", "file_path"]) },
+  { name: "telegram_read_media", description: "AI-read Telegram media.", parameters: P({ chat_id: S("Chat ID"), message_id: I("Msg ID") }, ["chat_id", "message_id"]) },
+  // Server
+  { name: "server_stop", description: "Shut down H-Claw." },
 ];
 
 // Map cleanly to Gemini

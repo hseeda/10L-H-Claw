@@ -8,13 +8,54 @@ let activeMessages = []; // Track { chatId, messageId, timestamp } for /wipe
 let highestMessageId = 0;
 
 /**
- * Clean Markdown V1 string for Telegram.
- * Telegram's Markdown parsing is very fragile. This helps prevent 'can\'t parse entities' errors.
+ * Format AI markdown output for Telegram Markdown V1.
+ * Converts headers, bold, bullets, dividers into compact Telegram-friendly text with emojis.
+ */
+function formatForTelegram(text) {
+    if (!text) return text;
+
+    let t = text;
+
+    // Convert ```code blocks``` — preserve them as-is (Telegram V1 supports ```)
+    const codeBlocks = [];
+    t = t.replace(/```[\s\S]*?```/g, (match) => {
+        codeBlocks.push(match);
+        return `__CODE_BLOCK_${codeBlocks.length - 1}__`;
+    });
+
+    // Convert **bold** → *bold* (Telegram V1 bold)
+    t = t.replace(/\*\*(.+?)\*\*/g, '*$1*');
+
+    // Convert ## Headers → emoji bold headers
+    t = t.replace(/^#{1,3}\s+(.+)$/gm, '📌 *$1*');
+
+    // Convert --- / === dividers → compact line
+    t = t.replace(/^[-=]{3,}$/gm, '─────');
+
+    // Convert bullet lists: - item → • item
+    t = t.replace(/^[\t ]*[-•]\s+/gm, '• ');
+
+    // Convert numbered sub-items with excessive indentation
+    t = t.replace(/^[\t ]{2,}(\d+\.)/gm, '  $1');
+
+    // Collapse 3+ blank lines → 1
+    t = t.replace(/\n{3,}/g, '\n\n');
+
+    // Restore code blocks
+    t = t.replace(/__CODE_BLOCK_(\d+)__/g, (_, i) => codeBlocks[i]);
+
+    // Trim trailing whitespace per line
+    t = t.replace(/[ \t]+$/gm, '');
+
+    return cleanMarkdownV1(t.trim());
+}
+
+/**
+ * Fix unmatched Markdown V1 characters to prevent Telegram parse errors.
  */
 function cleanMarkdownV1(text) {
     if (!text) return text;
 
-    // 1. Fix unmatched characters by counting them
     const counts = {
         '*': (text.match(/\*/g) || []).length,
         '_': (text.match(/_/g) || []).length,
@@ -23,18 +64,15 @@ function cleanMarkdownV1(text) {
 
     let cleaned = text;
 
-    // If underscores are unmatched or look like they are in words (e.g. some_variable)
-    // they often break Markdown V1. We'll escape them if they aren't clearly pairs.
+    // Escape underscores in words (e.g. some_variable) or if unmatched
     if (counts['_'] % 2 !== 0 || /\w_\w/.test(cleaned)) {
         cleaned = cleaned.replace(/_/g, '\\_');
     }
 
-    // If asterisks are unmatched, escape them all
     if (counts['*'] % 2 !== 0) {
         cleaned = cleaned.replace(/\*/g, '\\*');
     }
 
-    // If backticks are unmatched, escape them all
     if (counts['`'] % 2 !== 0) {
         cleaned = cleaned.replace(/`/g, '\\`');
     }
@@ -52,9 +90,9 @@ const tgClient = {
         if (!token) throw new Error('TELEGRAM_BOT_TOKEN is missing in .env');
 
         const url = `https://api.telegram.org/bot${token}/sendMessage`;
-        const body = { 
-            chat_id: chatId, 
-            text: useMarkdown ? cleanMarkdownV1(text) : text
+        const body = {
+            chat_id: chatId,
+            text: useMarkdown ? formatForTelegram(text) : text
         };
         
         // We use Markdown (V1) because it's simpler for basic formatting.
@@ -87,6 +125,8 @@ const tgClient = {
                     messageId: mId,
                     timestamp: Math.floor(Date.now() / 1000)
                 });
+
+                logTelegramMessage(data.result, null, true);
             }
 
             return data;
@@ -157,7 +197,7 @@ const tgClient = {
         formData.append(field, blob, path.basename(filePath));
 
         if (caption) {
-            formData.append('caption', cleanMarkdownV1(caption));
+            formData.append('caption', formatForTelegram(caption));
             formData.append('parse_mode', 'Markdown');
         }
 
@@ -190,6 +230,8 @@ const tgClient = {
                     messageId: mId,
                     timestamp: Math.floor(Date.now() / 1000)
                 });
+
+                logTelegramMessage(data.result, { type: field }, true);
             }
 
             return data;
@@ -243,43 +285,27 @@ const tgClient = {
     }
 };
 
-function logTelegramMessage(msg, mediaInfo = null) {
-    const direction = "📩 TELEGRAM INCOMING";
-    const dateStr = new Date(msg.date * 1000).toLocaleString();
-    
-    const fromName = msg.from?.first_name || 'Unknown';
-    const fromId = msg.from?.id || 'Unknown';
-    const chatId = msg.chat?.id || 'Unknown';
-    const chatTitle = msg.chat?.title || 'Private';
-
-    let bodyText = msg.text || '';
-    if (mediaInfo) {
-        bodyText += ` [MEDIA: ${mediaInfo.type.toUpperCase()}] ${mediaInfo.relativePath}`;
-    }
-    if (!bodyText) bodyText = '(No text content)';
-    
-    bodyText = bodyText.replace(/\n/g, '\n│          ');
-
-    const output = `\n┌─ ${direction} ──────────────────────────────
-│ From:    ${fromName} (${fromId})
-│ Chat:    ${chatTitle} (${chatId})
-│ Time:    ${dateStr}
-│ Msg ID:  ${msg.message_id}
-│ Body:    ${bodyText}
-└──────────────────────────────────────────`;
-    console.log(output);
+function logTelegramMessage(msg, mediaInfo = null, isOut = false) {
+    const time = new Date(msg.date * 1000).toLocaleTimeString();
+    const who = isOut ? 'H-Claw' : (msg.from?.first_name || 'Unknown');
+    const icon = isOut ? '📤' : '📩';
+    const dir = isOut ? 'OUT' : 'IN';
+    const media = mediaInfo ? ` 📎${mediaInfo.type}` : '';
+    const text = msg.text || msg.caption || '(empty)';
+    const body = text.split('\n')[0].substring(0, 120);
+    console.log(`${icon} TG ${dir}${media} │ ${who} │ ${time} │ #${msg.message_id} │ ${body}`);
 }
 
 async function listCommands(chatId) {
-    const reply = `🐾 *Telegram Bot Commands:*\n\n` +
-        `• \`/help\` - Show this help menu\n` +
-        `• \`/list models\` - List all available AI models\n` +
-        `• \`/current model\` - Show the currently active AI model\n` +
-        `• \`/reset model\` - Reset to the default model\n` +
-        `• \`/switch model <number>\` - Switch the active AI model\n` +
-        `• \`/wipe\` - Delete tracked messages from the past 24 hours\n` +
-        `• \`/wipe tmp\` - Delete all files in the ./tmp directory\n` +
-        `• \`/stop\` - Safely shut down the H-Claw server`;
+    const reply = `🐾 *Commands:*\n` +
+        `📖 \`/help\` — This menu\n` +
+        `📋 \`/list models\` — All models\n` +
+        `🎯 \`/current model\` — Active model\n` +
+        `♻️ \`/reset model\` — Reset model\n` +
+        `🔀 \`/switch model #\` — Switch model\n` +
+        `🌀 \`/wipe\` — Wipe messages\n` +
+        `🗑️ \`/wipe tmp\` — Clear tmp files\n` +
+        `🛑 \`/stop\` — Shut down`;
     await tgClient.sendTelegramMessage(chatId, reply);
 }
 

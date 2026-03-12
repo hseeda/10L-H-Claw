@@ -9,42 +9,73 @@ function getWhatsappClient() {
     return client;
 }
 
+/**
+ * Format AI markdown output for WhatsApp.
+ * WhatsApp supports: *bold*, _italic_, ~strikethrough~, ```monospace```
+ */
+function formatForWhatsApp(text) {
+    if (!text) return text;
+
+    let t = text;
+
+    // Preserve ```code blocks```
+    const codeBlocks = [];
+    t = t.replace(/```[\s\S]*?```/g, (match) => {
+        codeBlocks.push(match);
+        return `__CODE_BLOCK_${codeBlocks.length - 1}__`;
+    });
+
+    // Convert **bold** → *bold* (WhatsApp bold)
+    t = t.replace(/\*\*(.+?)\*\*/g, '*$1*');
+
+    // Convert ## Headers → emoji bold
+    t = t.replace(/^#{1,3}\s+(.+)$/gm, '📌 *$1*');
+
+    // Convert --- / === dividers → compact line
+    t = t.replace(/^[-=]{3,}$/gm, '─────');
+
+    // Convert bullet lists: - item → • item
+    t = t.replace(/^[\t ]*[-•]\s+/gm, '• ');
+
+    // Convert numbered sub-items with excessive indentation
+    t = t.replace(/^[\t ]{2,}(\d+\.)/gm, '  $1');
+
+    // Collapse 3+ blank lines → 1
+    t = t.replace(/\n{3,}/g, '\n\n');
+
+    // Restore code blocks
+    t = t.replace(/__CODE_BLOCK_(\d+)__/g, (_, i) => codeBlocks[i]);
+
+    // Trim trailing whitespace per line
+    t = t.replace(/[ \t]+$/gm, '');
+
+    return t.trim();
+}
+
 async function logMessageFormatted(msg) {
-    const isIncoming = !msg.id.fromMe;
-    const direction = isIncoming ? "📩 INCOMING" : "📤 OUTGOING";
-    const dateStr = new Date(msg.timestamp * 1000).toLocaleString();
-    
-    let fromName = msg.from;
-    let toName = msg.to;
-
-    try {
-        if (msg.from) {
-            const fromContact = await client.getContactById(msg.from);
-            fromName = fromContact?.name || fromContact?.pushname || fromContact?.shortName || fromContact?.number || msg.from;
-        }
-        if (msg.to) {
-            const toContact = await client.getContactById(msg.to);
-            toName = toContact?.name || toContact?.pushname || toContact?.shortName || toContact?.number || msg.to;
-        }
-    } catch (err) {}
-
-    // Simple heuristic for group/self
-    const isGroup = msg.from.includes('@g.us') || msg.to.includes('@g.us');
     const isSelf = msg.to === msg.from;
-    
-    let bodyText = msg.body || '';
-    // Multi-line bodies
-    bodyText = bodyText.replace(/\n/g, '\n│          ');
+    const isBot = msg.body.startsWith('🐾') || msg.body.startsWith('ℹ️') || msg.body.startsWith('❌');
 
-    const output = `\n┌─ ${direction} ──────────────────────────────
-│ From:    ${fromName === msg.from ? msg.from : `${fromName} (${msg.from})`}
-│ To:      ${toName === msg.to ? msg.to : `${toName} (${msg.to})`}
-│ Time:    ${dateStr}
-│ Type:    ${msg.type}
-│ FromMe:  ${msg.id.fromMe}  |  Group: ${isGroup}  |  Self: ${isSelf}
-│ Body:    ${bodyText}
-└──────────────────────────────────────────`;
-    console.log(output);
+    // In self-chat: user messages = IN, bot replies = OUT
+    const isOut = isSelf ? isBot : msg.id.fromMe;
+    const icon = isOut ? '📤' : '📩';
+    const dir = isOut ? 'OUT' : 'IN';
+    const time = new Date(msg.timestamp * 1000).toLocaleTimeString();
+
+    let who = msg.from;
+    try {
+        const c = await client.getContactById(msg.from);
+        who = c?.name || c?.pushname || c?.number || who;
+    } catch {}
+
+    const tags = [];
+    if (msg.from.includes('@g.us') || msg.to.includes('@g.us')) tags.push('👥');
+    if (isSelf) tags.push('🔁');
+    if (msg.hasMedia) tags.push('📎');
+    const tagStr = tags.length ? ` ${tags.join('')}` : '';
+
+    const body = (msg.body || '').split('\n')[0].substring(0, 120) || '(empty)';
+    console.log(`${icon} WA ${dir}${tagStr} │ ${who} │ ${time} │ ${body}`);
 }
 
 async function cleanUpMessages(msg) {
@@ -125,17 +156,17 @@ async function listContacts(msg) {
 }
 
 async function listCommands(msg) {
-    const reply = `🐾 *Built-in Commands:*\n\n` +
-        `• \`/help\` - Show this help menu\n` +
-        `• \`/wipe\` - Delete all bot messages from the past 24 hours\n` +
-        `• \`/wipe tmp\` - Delete all files in the ./tmp directory\n` +
-        `• \`/list models\` - List all available AI models\n` +
-        `• \`/current model\` - Show the currently active AI model\n` +
-        `• \`/switch model <number>\` - Switch the active AI model\n` +
-        `• \`/reset model\` - Reset to the default model\n` +
-        `• \`/list contacts [query]\` - List/Search your WhatsApp contacts\n` +
-        `• \`/print\` - Print current internal model variables to console\n` +
-        `• \`/stop\` - Safely shut down the H-Claw server`;
+    const reply = `🐾 *Commands:*\n` +
+        `📖 */help* — This menu\n` +
+        `🌀 */wipe* — Wipe messages (24h)\n` +
+        `🗑️ */wipe tmp* — Clear tmp files\n` +
+        `📋 */list models* — All models\n` +
+        `🎯 */current model* — Active model\n` +
+        `🔀 */switch model #* — Switch model\n` +
+        `♻️ */reset model* — Reset model\n` +
+        `👥 */list contacts [q]* — Search contacts\n` +
+        `🖨️ */print* — Debug model vars\n` +
+        `🛑 */stop* — Shut down`;
     await client.sendMessage(msg.to, reply);
 }
 
@@ -295,8 +326,7 @@ function initializeWhatsAppClient() {
             }
             const aiReply = await generateAIResponse(prompt, isSelf, client, chatHistory, 'whatsapp');
             
-            // AI responses already start with 🐾 in the handler or we add it here
-            let finalReply = aiReply;
+            let finalReply = formatForWhatsApp(aiReply);
             if (!finalReply.startsWith('🐾')) {
                 finalReply = '🐾 ' + finalReply;
             }
