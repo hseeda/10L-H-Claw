@@ -33,7 +33,11 @@
 ## ✨ Key Features
 
 - **🧠 Multi-Model Intelligence**: Seamlessly switch between **Google Gemini** and **OpenAI GPT** models using simple slash commands.
-- **📔 Persistent Memory**: A dedicated long-term memory system (`MEMORY.md`) allowing the AI to recall facts, relationships, and shared media across conversations.
+- **💬 Conversation Persistence**: Recent message history is automatically reinjected into the AI's context for every message, ensuring a smooth and coherent dialogue.
+- **📔 Persistent Memory (Facts)**:
+  - **Auto-Learning**: The bot determines when to save important information automatically based on the conversation flow.
+  - **On-Demand**: You can explicitly instruct the bot to "remember" or "forget" specific details through your messages.
+  - **Management**: A dedicated suite of tools allows the AI to **list**, **add**, **delete**, and **compact** facts to keep your memory file (`MEMORY.md`) organized and relevant.
 - **🛠️ Extensible Toolset**:
   - **System Access**: Run Bash and PowerShell commands directly from WhatsApp.
   - **Email Management**: Full MAPI/SMTP/IMAP access to send, receive, list, and organize emails across multiple accounts (Gmail, Outlook, Private etc.).
@@ -194,6 +198,13 @@ These are "recipes" or complex workflows stored in `MD/TOOLS.md`. The AI consult
 ## 📐 Architecture
 
 H-Claw acts as an intelligent middleware, orchestrating requests between the `whatsapp-web.js` client and various AI provider APIs. It manages context via local Markdown files, ensuring your AI "knows" you better the more you use it.
+
+---
+
+## 🔮 Roadmap & Future Additions
+
+- **💓 Heartbeat Service**: Implementation of a proactive "heartbeat" system allowing H-Claw to initiate conversations, provide timely reminders, and perform background checks without waiting for a user prompt.
+- **🎭 Personalities & Moods**: Expanded configuration for the bot's "Soul" to allow dynamic persona switching.
 
 ---
 
