@@ -16,22 +16,17 @@ const memoryPath = path.join(__dirname, '..', 'MD', 'MEMORY.md');
 const toolsPath  = path.join(__dirname, '..', 'MD', 'TOOLS.md');
 const soulPath   = path.join(__dirname, '..', 'MD', 'SOUL.md');
 
-const BASE_SYSTEM_PROMPT =
-  "You are an AI assistant named H-Claw. Keep your answers helpful and concise.";
-
 const PLATFORM_PROMPTS = {
-    whatsapp: "Platform: WhatsApp. Tools: send messages, read media, list contacts.",
-    telegram: "Platform: Telegram. Tools: send messages, list updates, delete messages."
+    whatsapp: "You are H-Claw, a concise AI assistant. Platform: WhatsApp. Use whatsapp_* tools only.",
+    telegram: "You are H-Claw, a concise AI assistant. Platform: Telegram. Use telegram_* tools only."
 };
 
-const OS_ENVIRONMENT_SELECTOR = `Shell: Use execute_powershell on WSL/Windows, execute_bash on Linux/macOS. Detect with: grep -qEi "(Microsoft|WSL)" /proc/version && echo WSL || echo Unix.`;
-
 function getSystemPrompt(platform = 'whatsapp') {
-  let prompt = BASE_SYSTEM_PROMPT + "\n" + (PLATFORM_PROMPTS[platform] || PLATFORM_PROMPTS.whatsapp) + "\n\n" + OS_ENVIRONMENT_SELECTOR + "\n\n";
+  let prompt = (PLATFORM_PROMPTS[platform] || PLATFORM_PROMPTS.whatsapp) + "\n";
   try {
-    if (fs.existsSync(soulPath)) prompt += "--- SOUL ---\n" + fs.readFileSync(soulPath, 'utf8') + "\n\n";
-    if (fs.existsSync(toolsPath)) prompt += "--- TOOLS & FACTS ---\n" + fs.readFileSync(toolsPath, 'utf8') + "\n\n";
-    if (fs.existsSync(memoryPath)) prompt += "--- MEMORY ---\n" + fs.readFileSync(memoryPath, 'utf8') + "\n\n";
+    if (fs.existsSync(soulPath)) prompt += fs.readFileSync(soulPath, 'utf8') + "\n";
+    if (fs.existsSync(toolsPath)) prompt += fs.readFileSync(toolsPath, 'utf8') + "\n";
+    if (fs.existsSync(memoryPath)) prompt += fs.readFileSync(memoryPath, 'utf8') + "\n";
   } catch(e) {
     console.error("Error loading prompt context files:", e);
   }
@@ -85,8 +80,8 @@ async function getGeminiResponse(modelName, prompt, client, chatHistory = "", pl
     const toolResponseParts = [];
     for (const part of toolCallParts) {
       const { name, args } = part.functionCall;
-      const result = await executeTool(name, args, client);
-      
+      const result = await executeTool(name, args, client, platform);
+
       // If the tool uploaded a file, we need to extract the URI and MimeType
       // to pass it genuinely as 'fileData' so the model can read it, not just as text.
       if (typeof result === 'string' && result.includes('[FILE_URI_ATTACHMENT]')) {
@@ -160,7 +155,7 @@ async function getOpenAIResponse(modelName, prompt, client, chatHistory = "", pl
     for (const toolCall of choice.message.tool_calls) {
       const name = toolCall.function.name;
       const args = JSON.parse(toolCall.function.arguments);
-      const result = await executeTool(name, args, client);
+      const result = await executeTool(name, args, client, platform);
       messages.push({
         role: 'tool',
         tool_call_id: toolCall.id,

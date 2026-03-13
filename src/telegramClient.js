@@ -1,7 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 // aiHandler is lazy-loaded in initializeTelegramBot to avoid circular dependency
-const { getActiveModel, getAvailableModels, getCurrentModelInfo, getAvailableModelsList, resetToDefaultModel, switchModelByNumber } = require('./Models');
+const { getActiveModel, getAvailableModels, getCurrentModelInfo, getAvailableModelsList, resetToDefaultModel, switchModelByNumber, switchImageModelByNumber } = require('./Models');
 
 const telegramHistory = {}; // Store history per chat ID
 let activeMessages = []; // Track { chatId, messageId, timestamp } for /wipe
@@ -302,7 +302,8 @@ async function listCommands(chatId) {
         `📋 \`/list models\` — All models\n` +
         `🎯 \`/current model\` — Active model\n` +
         `♻️ \`/reset model\` — Reset model\n` +
-        `🔀 \`/switch model #\` — Switch model\n` +
+        `🔀 \`/switch model #\` — Switch chat model\n` +
+        `🎨 \`/switch image model #\` — Switch image model\n` +
         `🌀 \`/wipe\` — Wipe messages\n` +
         `🗑️ \`/wipe tmp\` — Clear tmp files\n` +
         `🛑 \`/stop\` — Shut down`;
@@ -387,6 +388,12 @@ async function builtInCommands(chatId, text) {
         const { wipeTmpDirectory } = require('./aiTools');
         const count = wipeTmpDirectory();
         await tgClient.sendTelegramMessage(chatId, `🐾 *Tmp Wipe complete!* Cleared ${count} files from \`./tmp\`.`);
+        return true;
+    }
+    if (cmd.startsWith('/switch image model ')) {
+        const targetNum = parseInt(text.trim().toLowerCase().replace('/switch image model ', ''));
+        const reply = switchImageModelByNumber(targetNum);
+        await tgClient.sendTelegramMessage(chatId, reply);
         return true;
     }
     if (cmd.startsWith('/switch model ')) {

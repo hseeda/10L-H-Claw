@@ -67,6 +67,21 @@ const activeModel = {
 
 activeModel.set(1);
 
+function getAvailableImageModels() {
+    const order = (process.env.IMAGE_GENERATION_ORDER || '').replace(/;+$/, '').trim();
+    if (!order) return [];
+    return order.split(';').map(e => e.trim()).filter(Boolean);
+}
+
+const activeImageModel = {
+    number: 1,
+    set(n) { this.number = n; }
+};
+
+function getActiveImageModel() {
+    return activeImageModel;
+}
+
 function getActiveModel() {
     return activeModel;
 }
@@ -101,12 +116,24 @@ function getCurrentModelInfo() {
 function getAvailableModelsList() {
     const models = getAvailableModels();
     const active = getActiveModel().number;
-    let r = '📋 *Models:*\n';
+    let r = '📋 *Chat Models:*\n';
     models.forEach((m, i) => {
         const p = m.split(':')[0].toLowerCase();
         const tag = (i + 1) === active ? ' 🎯' : '';
         r += `${i + 1}. ${providerEmoji(p)} \`${m}\`${tag}\n`;
     });
+
+    const imgModels = getAvailableImageModels();
+    if (imgModels.length) {
+        const activeImg = activeImageModel.number;
+        r += '\n🎨 *Image Models:*\n';
+        imgModels.forEach((entry, i) => {
+            const p = entry.split(':')[0].toLowerCase();
+            const tag = (i + 1) === activeImg ? ' 🎯' : '';
+            r += `${i + 1}. ${providerEmoji(p)} \`${entry}\`${tag}\n`;
+        });
+    }
+
     return r;
 }
 
@@ -126,6 +153,24 @@ function switchModelByNumber(targetNum) {
     return `❌ Model #${targetNum} not found. Use \`/list models\``;
 }
 
+function switchImageModelByNumber(targetNum) {
+    const models = getAvailableImageModels();
+    if (!isNaN(targetNum) && targetNum > 0 && targetNum <= models.length) {
+        activeImageModel.set(targetNum);
+        const entry = models[targetNum - 1];
+        const p = entry.split(':')[0].toLowerCase();
+        return `✅ *Image Model:* ${providerEmoji(p)} \`${entry}\``;
+    }
+    return `❌ Image model #${targetNum} not found. Use \`/list models\``;
+}
+
+function getCurrentImageModelEntry() {
+    const models = getAvailableImageModels();
+    const n = activeImageModel.number;
+    if (n >= 1 && n <= models.length) return models[n - 1];
+    return models[0] || null;
+}
+
 function printModelVariables() {
     const model = getActiveModel();
     let reply = `ModelNumber      =  ${model.number}\n`
@@ -137,7 +182,7 @@ function printModelVariables() {
     console.log(reply);
 }
 
-module.exports = { 
+module.exports = {
     getActiveModel,
     getAvailableModels,
     activeModelFallback,
@@ -145,5 +190,7 @@ module.exports = {
     getAvailableModelsList,
     resetToDefaultModel,
     switchModelByNumber,
+    switchImageModelByNumber,
+    getCurrentImageModelEntry,
     printModelVariables
 };

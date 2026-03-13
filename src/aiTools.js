@@ -24,12 +24,13 @@ try {
   console.error("❌ Error initializing AI clients in aiTools.js:", e.message);
 }
 
-const memoryPath = path.join(__dirname, "MD", "MEMORY.md");
-const toolsPath = path.join(__dirname, "MD", "TOOLS.md");
-const tmpDir = path.join(__dirname, "tmp");
+const memoryPath = path.join(__dirname, "..", "MD", "MEMORY.md");
+const toolsPath = path.join(__dirname, "..", "MD", "TOOLS.md");
+const tmpDir = path.join(__dirname, "..", "tmp");
+const mediaDir = path.join(__dirname, "..", "MD", "media");
 
 // Ensure directories exist
-[tmpDir].forEach(dir => {
+[tmpDir, mediaDir].forEach(dir => {
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
   }
@@ -74,52 +75,43 @@ const I = (d) => ({ type: "INTEGER", description: d });
 const B = (d) => ({ type: "BOOLEAN", description: d });
 
 const customToolsSchema = [
-  // Shell
-  { name: "execute_bash", description: "Run bash command.", parameters: P({ command: S("Command") }, ["command"]) },
-  { name: "execute_powershell", description: "Run PowerShell command.", parameters: P({ command: S("Command") }, ["command"]) },
-  // Memory
-  { name: "memory_list", description: "List memory facts." },
-  { name: "memory_add", description: "Add fact to memory.", parameters: P({ fact: S("Fact") }, ["fact"]) },
-  { name: "memory_add_media", description: "Save media to memory.", parameters: P({ file_path: S("Path"), description: S("Description") }, ["file_path", "description"]) },
-  { name: "memory_remove", description: "Remove fact by index.", parameters: P({ index: I("1-based index") }, ["index"]) },
-  { name: "memory_edit", description: "Edit fact by index.", parameters: P({ index: I("1-based index"), new_fact: S("New fact") }, ["index", "new_fact"]) },
-  { name: "memory_clear", description: "Clear all memory." },
-  // File system
-  { name: "file_read", description: "Read file.", parameters: P({ file_path: S("Path") }, ["file_path"]) },
-  { name: "file_write", description: "Write file.", parameters: P({ file_path: S("Path"), content: S("Content") }, ["file_path", "content"]) },
-  { name: "file_append", description: "Append to file.", parameters: P({ file_path: S("Path"), content: S("Text") }, ["file_path", "content"]) },
-  { name: "file_list", description: "List directory.", parameters: P({ dir_path: S("Path") }, ["dir_path"]) },
-  // System
-  { name: "tool_save", description: "Save tool to TOOLS.md.", parameters: P({ tool_content: S("Content") }, ["tool_content"]) },
-  // WhatsApp
-  { name: "whatsapp_send", description: "Send WhatsApp text.", parameters: P({ target_id: S("Phone"), message: S("Text") }, ["target_id", "message"]) },
-  { name: "whatsapp_list_recent", description: "Get WhatsApp history.", parameters: P({ target_id: S("Phone"), limit: I("Max count") }, ["target_id"]) },
-  { name: "whatsapp_list_contacts", description: "Search WhatsApp contacts.", parameters: P({ query: S("Search term") }) },
-  { name: "whatsapp_reply", description: "Reply to message.", parameters: P({ message_id: S("Msg ID"), message: S("Reply") }, ["message_id", "message"]) },
-  // Media generation
-  { name: "generate_image", description: "Generate DALL-E 3 image.", parameters: P({ prompt: S("Visual prompt"), save_as_fact: B("Save to memory") }, ["prompt"]) },
-  { name: "generate_audio", description: "Text to speech.", parameters: P({ text: S("Text"), voice: S("alloy|echo|fable|onyx|nova|shimmer") }, ["text", "voice"]) },
-  { name: "whatsapp_send_media", description: "Send media via WhatsApp.", parameters: P({ target_id: S("Phone"), file_path: S("Path"), caption: S("Caption") }, ["target_id", "file_path"]) },
-  { name: "whatsapp_read_media", description: "AI-read WhatsApp media.", parameters: P({ message_id: S("Msg ID") }, ["message_id"]) },
-  { name: "whatsapp_download_media", description: "Download WhatsApp media.", parameters: P({ message_id: S("Msg ID"), filename: S("Filename") }, ["message_id"]) },
-  // Mail
-  { name: "mail_add_account", description: "Add mail account.", parameters: P({ name: S("Name"), host: S("Host"), port: I("Port"), secure: B("SSL"), user: S("User"), pass: S("Pass"), type: S("smtp|imap") }, ["name", "host", "port", "secure", "user", "pass", "type"]) },
-  { name: "mail_list_accounts", description: "List mail accounts." },
-  { name: "mail_send_email", description: "Send email.", parameters: P({ account_name: S("Account"), to: S("To"), subject: S("Subject"), body: S("Body"), html: S("HTML") }, ["account_name", "to", "subject", "body"]) },
-  { name: "mail_list_folders", description: "List IMAP folders.", parameters: P({ account_name: S("Account") }, ["account_name"]) },
-  { name: "mail_list_messages", description: "List emails (meta).", parameters: P({ account_name: S("Account"), folder: S("Folder"), limit: I("Limit") }, ["account_name"]) },
-  { name: "mail_list_messages_all", description: "List emails (full).", parameters: P({ account_name: S("Account"), folder: S("Folder"), limit: I("Limit") }, ["account_name"]) },
-  { name: "mail_get_message", description: "Get email.", parameters: P({ account_name: S("Account"), uid: S("UID"), folder: S("Folder"), download_attachments: B("Download") }, ["account_name", "uid"]) },
-  { name: "mail_delete_message", description: "Delete email.", parameters: P({ account_name: S("Account"), uid: S("UID"), folder: S("Folder") }, ["account_name", "uid"]) },
-  { name: "mail_move_message", description: "Move email.", parameters: P({ account_name: S("Account"), uid: S("UID"), target_folder: S("Target"), source_folder: S("Source") }, ["account_name", "uid", "target_folder"]) },
-  // Telegram
-  { name: "telegram_send", description: "Send Telegram message.", parameters: P({ chat_id: S("Chat ID"), message: S("Text") }, ["chat_id", "message"]) },
-  { name: "telegram_list_recent", description: "Get Telegram updates.", parameters: P({ offset: I("Offset"), limit: I("Limit") }) },
-  { name: "telegram_delete", description: "Delete Telegram message.", parameters: P({ chat_id: S("Chat ID"), message_id: I("Msg ID") }, ["chat_id", "message_id"]) },
-  { name: "telegram_send_media", description: "Send Telegram media.", parameters: P({ chat_id: S("Chat ID"), file_path: S("Path"), caption: S("Caption") }, ["chat_id", "file_path"]) },
-  { name: "telegram_read_media", description: "AI-read Telegram media.", parameters: P({ chat_id: S("Chat ID"), message_id: I("Msg ID") }, ["chat_id", "message_id"]) },
-  // Server
-  { name: "server_stop", description: "Shut down H-Claw." },
+  { name: "execute_bash", description: "Bash cmd", parameters: P({ command: S("c") }, ["command"]) },
+  { name: "execute_powershell", description: "PowerShell cmd", parameters: P({ command: S("c") }, ["command"]) },
+  { name: "memory_list", description: "List facts" },
+  { name: "memory_add", description: "Add fact", parameters: P({ fact: S("f") }, ["fact"]) },
+  { name: "memory_add_media", description: "Save media fact", parameters: P({ file_path: S("p"), description: S("d") }, ["file_path", "description"]) },
+  { name: "memory_remove", description: "Remove fact", parameters: P({ index: I("1-based") }, ["index"]) },
+  { name: "memory_edit", description: "Edit fact", parameters: P({ index: I("1-based"), new_fact: S("t") }, ["index", "new_fact"]) },
+  { name: "memory_clear", description: "Clear facts" },
+  { name: "file_read", description: "Read file", parameters: P({ file_path: S("p") }, ["file_path"]) },
+  { name: "file_write", description: "Write file", parameters: P({ file_path: S("p"), content: S("d") }, ["file_path", "content"]) },
+  { name: "file_append", description: "Append file", parameters: P({ file_path: S("p"), content: S("d") }, ["file_path", "content"]) },
+  { name: "file_list", description: "List dir", parameters: P({ dir_path: S("p") }, ["dir_path"]) },
+  { name: "tool_save", description: "Save to TOOLS.md", parameters: P({ tool_content: S("d") }, ["tool_content"]) },
+  { name: "whatsapp_send", description: "Send WA text", parameters: P({ target_id: S("phone"), message: S("t") }, ["target_id", "message"]) },
+  { name: "whatsapp_list_recent", description: "WA history", parameters: P({ target_id: S("phone"), limit: I("n") }, ["target_id"]) },
+  { name: "whatsapp_list_contacts", description: "Search WA contacts", parameters: P({ query: S("q") }) },
+  { name: "whatsapp_reply", description: "Reply WA msg", parameters: P({ message_id: S("id"), message: S("t") }, ["message_id", "message"]) },
+  { name: "generate_image", description: "Gen/edit image; image_path for img2img", parameters: P({ prompt: S("p"), image_path: S("src") }, ["prompt"]) },
+  { name: "generate_audio", description: "TTS", parameters: P({ text: S("t"), voice: S("alloy|echo|fable|onyx|nova|shimmer") }, ["text", "voice"]) },
+  { name: "whatsapp_send_media", description: "Send WA media", parameters: P({ target_id: S("phone"), file_path: S("p"), caption: S("c") }, ["target_id", "file_path"]) },
+  { name: "whatsapp_read_media", description: "AI-read WA media", parameters: P({ message_id: S("id") }, ["message_id"]) },
+  { name: "whatsapp_download_media", description: "Download WA media", parameters: P({ message_id: S("id"), filename: S("n") }, ["message_id"]) },
+  { name: "mail_add_account", description: "Add mail acct", parameters: P({ name: S("n"), host: S("h"), port: I("p"), secure: B("ssl"), user: S("u"), pass: S("pw"), type: S("smtp|imap") }, ["name", "host", "port", "secure", "user", "pass", "type"]) },
+  { name: "mail_list_accounts", description: "List mail accts" },
+  { name: "mail_send_email", description: "Send email", parameters: P({ account_name: S("a"), to: S("to"), subject: S("s"), body: S("b"), html: S("h") }, ["account_name", "to", "subject", "body"]) },
+  { name: "mail_list_folders", description: "List IMAP folders", parameters: P({ account_name: S("a") }, ["account_name"]) },
+  { name: "mail_list_messages", description: "List emails headers", parameters: P({ account_name: S("a"), folder: S("f"), limit: I("n") }, ["account_name"]) },
+  { name: "mail_list_messages_all", description: "List emails full", parameters: P({ account_name: S("a"), folder: S("f"), limit: I("n") }, ["account_name"]) },
+  { name: "mail_get_message", description: "Get email", parameters: P({ account_name: S("a"), uid: S("u"), folder: S("f"), download_attachments: B("dl") }, ["account_name", "uid"]) },
+  { name: "mail_delete_message", description: "Delete email", parameters: P({ account_name: S("a"), uid: S("u"), folder: S("f") }, ["account_name", "uid"]) },
+  { name: "mail_move_message", description: "Move email", parameters: P({ account_name: S("a"), uid: S("u"), target_folder: S("dest"), source_folder: S("src") }, ["account_name", "uid", "target_folder"]) },
+  { name: "telegram_send", description: "Send TG msg", parameters: P({ chat_id: S("c"), message: S("t") }, ["chat_id", "message"]) },
+  { name: "telegram_list_recent", description: "TG updates", parameters: P({ offset: I("o"), limit: I("n") }) },
+  { name: "telegram_delete", description: "Delete TG msg", parameters: P({ chat_id: S("c"), message_id: I("m") }, ["chat_id", "message_id"]) },
+  { name: "telegram_send_media", description: "Send TG media", parameters: P({ chat_id: S("c"), file_path: S("p"), caption: S("cap") }, ["chat_id", "file_path"]) },
+  { name: "telegram_read_media", description: "AI-read TG media", parameters: P({ chat_id: S("c"), message_id: I("m") }, ["chat_id", "message_id"]) },
+  { name: "server_stop", description: "Shutdown" },
 ];
 
 // Map cleanly to Gemini
@@ -196,8 +188,8 @@ function processTarget(target_id) {
   return target;
 }
 
-async function executeTool(name, args, client = null) {
-  console.log(`🔧  Tool called: ${name}`);
+async function executeTool(name, args, client = null, platform = 'whatsapp') {
+  console.log(`🔧  Tool called: ${name} [${platform}]`);
 
   // ─── SERVER TOOLS ───
   if (name === "server_stop") {
@@ -232,13 +224,21 @@ async function executeTool(name, args, client = null) {
       if (!fs.existsSync(fp))
         return `❌ File not found at path: ${fp}`;
 
-      // Add it to memory
+      // Ensure file is in mediaDir or move it
+      const fileName = path.basename(fp);
+      const targetPath = path.join(mediaDir, fileName);
+      
+      if (path.resolve(fp) !== path.resolve(targetPath)) {
+        fs.copyFileSync(fp, targetPath);
+      }
+
+      // Add it to memory with standardized path
       const lines = readMemoryLines();
       const finalDesc = (args.description || "User-provided media").trim();
-      lines.push(`${finalDesc} (File Path: @[${fp}])`);
+      lines.push(`${finalDesc} (File Path: @[${targetPath}])`);
       writeMemoryLines(lines);
 
-      return `✅ Media fact added.`;
+      return `✅ Media fact added and stored in ../MD/media.`;
     } catch (e) {
       return `❌ Save Media Error: ${e.message}`;
     }
@@ -319,7 +319,7 @@ async function executeTool(name, args, client = null) {
           ? "\n" + args.tool_content
           : args.tool_content;
       fs.appendFileSync(toolsPath, appended + "\n", "utf8");
-      return `✅ Saved to ./MD/TOOLS.md`;
+      return `✅ Saved to ../MD/TOOLS.md`;
     } catch (e) {
       return `❌ Tool Save Error: ${e.message}`;
     }
@@ -417,44 +417,158 @@ async function executeTool(name, args, client = null) {
     }
   }
 
-  // ─── MEDIA GENERATION TOOLS ───
   if (name === "generate_image") {
-    if (!internalOpenAI) return `❌ OpenAI Client not configured.`;
-    try {
-      console.log(`🎨 Requesting DALL-E 3 image: "${args.prompt}"...`);
-      const response = await internalOpenAI.images.generate({
-        model: "dall-e-3",
-        prompt: args.prompt,
-        n: 1,
-        size: "1024x1024",
-      });
-      const imageUrl = response.data[0].url;
-      console.log(`📡 Image URL received. Downloading...`);
-      
-      // Download Image with 30s timeout
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 30000);
+    const { getCurrentImageModelEntry } = require("./Models");
+    const orderStr = (process.env.IMAGE_GENERATION_ORDER || "").replace(/;+$/, "").trim();
+    if (!orderStr) return `❌ No image models configured. Set IMAGE_GENERATION_ORDER in .env`;
 
-      try {
-        const fetchResponse = await fetch(imageUrl, { signal: controller.signal });
-        clearTimeout(timeoutId);
-        if (!fetchResponse.ok) throw new Error(`HTTP ${fetchResponse.status}`);
-        
-        const buffer = await fetchResponse.arrayBuffer();
-        const fn = `img_${Date.now()}.png`;
-        const fp = path.join(tmpDir, fn);
-        
-        console.log(`💾 Saving image to: ${fp}`);
-        fs.writeFileSync(fp, Buffer.from(buffer));
-        
-            return `✅ Image: ${fp}`;
-      } catch (fErr) {
-        clearTimeout(timeoutId);
-        return `❌ Image Download Error: ${fErr.message}`;
+    const entries = orderStr.split(";").map(e => {
+      const [prov, model] = e.trim().split(":");
+      return prov && model ? { provider: prov.trim().toLowerCase(), model: model.trim() } : null;
+    }).filter(Boolean);
+
+    if (entries.length === 0) return `❌ IMAGE_GENERATION_ORDER is malformed. Use provider:model format.`;
+
+    // Put active image model first, then the rest as fallbacks
+    const activeEntry = getCurrentImageModelEntry();
+    const sorted = [];
+    if (activeEntry) {
+      const [ap, am] = activeEntry.split(":");
+      const activeIdx = entries.findIndex(e => e.provider === ap.trim().toLowerCase() && e.model === am.trim());
+      if (activeIdx >= 0) {
+        sorted.push(entries[activeIdx]);
+        entries.forEach((e, i) => { if (i !== activeIdx) sorted.push(e); });
+      } else {
+        sorted.push(...entries);
       }
-    } catch (e) {
-      return `❌ Image Gen Error: ${e.message}`;
+    } else {
+      sorted.push(...entries);
     }
+
+    // Load source image if provided (for img-to-img)
+    let srcImageData = null;
+    let srcMimeType = "image/png";
+    if (args.image_path) {
+      const imgPath = args.image_path.trim();
+      if (!fs.existsSync(imgPath)) return `❌ Source image not found: ${imgPath}`;
+      srcImageData = fs.readFileSync(imgPath);
+      const ext = path.extname(imgPath).toLowerCase();
+      if (ext === ".jpg" || ext === ".jpeg") srcMimeType = "image/jpeg";
+      else if (ext === ".webp") srcMimeType = "image/webp";
+      else if (ext === ".gif") srcMimeType = "image/gif";
+      console.log(`🖼️ Source image loaded: ${imgPath} (${srcMimeType})`);
+    }
+
+    for (const entry of sorted) {
+      try {
+        console.log(`🎨 Trying ${entry.provider}:${entry.model} for "${args.prompt}"${srcImageData ? " [img-to-img]" : ""}...`);
+
+        if (entry.provider === "openai" || entry.provider === "chatgpt") {
+          if (!internalOpenAI) { console.log(`⚠️ OpenAI client not configured, skipping...`); continue; }
+          let response;
+          if (srcImageData) {
+            // OpenAI image edit: requires image input
+            const imgFile = new File([srcImageData], "source.png", { type: srcMimeType });
+            response = await internalOpenAI.images.edit({
+              model: entry.model,
+              image: imgFile,
+              prompt: args.prompt,
+              n: 1,
+              size: "1024x1024",
+            });
+          } else {
+            response = await internalOpenAI.images.generate({
+              model: entry.model,
+              prompt: args.prompt,
+              n: 1,
+              size: "1024x1024",
+              response_format: "b64_json",
+            });
+          }
+          const imgData = response.data[0].b64_json || response.data[0].b64_json;
+          if (!imgData && response.data[0].url) {
+            // Some edit responses return URL instead of b64
+            const imgResp = await fetch(response.data[0].url);
+            const buffer = Buffer.from(await imgResp.arrayBuffer());
+            const fn = `img_oai_${Date.now()}.png`;
+            const fp = path.join(tmpDir, fn);
+            fs.writeFileSync(fp, buffer);
+            console.log(`💾 Saved OpenAI image to: ${fp}`);
+            return `✅ Image: ${fp}`;
+          }
+          const buffer = Buffer.from(imgData, "base64");
+          const fn = `img_oai_${Date.now()}.png`;
+          const fp = path.join(tmpDir, fn);
+          fs.writeFileSync(fp, buffer);
+          console.log(`💾 Saved OpenAI image to: ${fp}`);
+          return `✅ Image: ${fp}`;
+        }
+
+        if (entry.provider === "gemini") {
+          if (!geminiToolClient) { console.log(`⚠️ Gemini client not configured, skipping...`); continue; }
+          const parts = [{ text: args.prompt }];
+          if (srcImageData) {
+            parts.unshift({ inlineData: { mimeType: srcMimeType, data: srcImageData.toString("base64") } });
+          }
+          const response = await geminiToolClient.models.generateContent({
+            model: entry.model,
+            contents: [{ role: "user", parts }],
+            config: { responseModalities: ["TEXT", "IMAGE"] },
+          });
+          const resParts = response.candidates?.[0]?.content?.parts || [];
+          const imgPart = resParts.find(p => p.inlineData && p.inlineData.mimeType?.startsWith("image/"));
+          if (!imgPart) {
+            console.log(`⚠️ ${entry.model} returned no image data, trying next...`);
+            continue;
+          }
+          const buffer = Buffer.from(imgPart.inlineData.data, "base64");
+          const fn = `img_gem_${Date.now()}.png`;
+          const fp = path.join(tmpDir, fn);
+          fs.writeFileSync(fp, buffer);
+          console.log(`💾 Saved Gemini image to: ${fp}`);
+          return `✅ Image: ${fp}`;
+        }
+
+        if (entry.provider === "imagen") {
+          if (!geminiToolClient) { console.log(`⚠️ Gemini client not configured, skipping...`); continue; }
+          const config = { numberOfImages: 1 };
+          if (srcImageData) {
+            config.editConfig = {
+              editMode: "INPAINT_INSERTION",
+            };
+          }
+          const reqBody = {
+            model: entry.model,
+            prompt: args.prompt,
+            config,
+          };
+          if (srcImageData) {
+            reqBody.referenceImages = [{
+              referenceImage: { bytesBase64Encoded: srcImageData.toString("base64") },
+              referenceType: "STYLE_IMAGE",
+            }];
+          }
+          const response = await geminiToolClient.models.generateImages(reqBody);
+          const images = response.generatedImages || [];
+          if (images.length === 0 || !images[0].image?.imageBytes) {
+            console.log(`⚠️ ${entry.model} returned no image data, trying next...`);
+            continue;
+          }
+          const buffer = Buffer.from(images[0].image.imageBytes, "base64");
+          const fn = `img_img_${Date.now()}.png`;
+          const fp = path.join(tmpDir, fn);
+          fs.writeFileSync(fp, buffer);
+          console.log(`💾 Saved Imagen image to: ${fp}`);
+          return `✅ Image: ${fp}`;
+        }
+
+        console.log(`⚠️ Unknown provider "${entry.provider}", skipping...`);
+      } catch (e) {
+        console.log(`⚠️ ${entry.provider}:${entry.model} failed: ${e.message}`);
+        continue;
+      }
+    }
+    return `❌ All image models failed.`;
   }
 
   if (name === "generate_audio") {

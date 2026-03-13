@@ -1,7 +1,7 @@
 const { Client, LocalAuth } = require('whatsapp-web.js');
 const qrcode = require('qrcode-terminal');
 const { generateAIResponse } = require('./aiHandler');
-const { getActiveModel, getAvailableModels, getCurrentModelInfo, getAvailableModelsList, resetToDefaultModel, switchModelByNumber, printModelVariables } = require('./Models');
+const { getActiveModel, getAvailableModels, getCurrentModelInfo, getAvailableModelsList, resetToDefaultModel, switchModelByNumber, switchImageModelByNumber, printModelVariables } = require('./Models');
 
 let client = null;
 
@@ -162,7 +162,8 @@ async function listCommands(msg) {
         `🗑️ */wipe tmp* — Clear tmp files\n` +
         `📋 */list models* — All models\n` +
         `🎯 */current model* — Active model\n` +
-        `🔀 */switch model #* — Switch model\n` +
+        `🔀 */switch model #* — Switch chat model\n` +
+        `🎨 */switch image model #* — Switch image model\n` +
         `♻️ */reset model* — Reset model\n` +
         `👥 */list contacts [q]* — Search contacts\n` +
         `🖨️ */print* — Debug model vars\n` +
@@ -200,6 +201,13 @@ async function builtInCommands(msg) {
         return true;
     }
 
+    if (cmd.startsWith('/switch image model ')) {
+        const targetNum = parseInt(msg.body.trim().toLowerCase().replace('/switch image model ', ''));
+        const reply = switchImageModelByNumber(targetNum);
+        await client.sendMessage(msg.to, reply);
+        return true;
+    }
+
     if (cmd.startsWith('/switch model ')) {
         const targetNum = parseInt(msg.body.trim().toLowerCase().replace('/switch model ', ''));
         const reply = switchModelByNumber(targetNum);
@@ -220,7 +228,7 @@ async function builtInCommands(msg) {
     if(msg.body.trim().toLowerCase().startsWith('/wipe tmp')) {
         const { wipeTmpDirectory } = require('./aiTools');
         const count = wipeTmpDirectory();
-        await msg.reply(`🐾 *Tmp Wipe complete!* Cleared ${count} files from \`./tmp\`.`);
+        await msg.reply(`🐾 *Tmp Wipe complete!* Cleared ${count} files from \`../tmp\`.`);
         return true;
     }
 

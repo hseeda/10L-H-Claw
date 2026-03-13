@@ -2,61 +2,205 @@
   <img src="assets/logo.png" width="150" alt="H-Claw Logo">
 </p>
 
-# 🐾 H-Claw: The WhatsApp AI Power-Suite
+# H-Claw: Multi-Platform AI Power-Suite
 
 ![H-Claw Banner](assets/banner.png)
 
-**H-Claw** is a premium, personal AI assistant that lives inside your WhatsApp. Built with a "Note to Self" philosophy, it serves as a powerful bridge between your messaging app and cutting-edge AI models, persistent memory, and local system tools.
+**H-Claw** is a personal AI assistant that lives inside your WhatsApp and Telegram. Built with a "Note to Self" philosophy, it bridges your messaging apps with cutting-edge AI models, persistent memory, system-level tools, email management, and media generation — all from a single chat window.
 
-## 🏗️ Project Structure
+---
 
-```text
-├── hclaw.js                # Main application entry point
-├── src/                    # Source code directory
-│   ├── Models.js           # AI Model configuration
-│   ├── aiHandler.js        # AI message processing logic
-│   ├── aiTools.js          # Tool definitions for AI
-│   ├── mailTools.js        # Email management
-│   ├── serverTools.js      # Server utility tools
-│   ├── telegramClient.js   # Telegram bot integration
-│   └── whatsappClient.js   # WhatsApp bot integration
-├── secrets/                # Configuration and secret files
-│   ├── .env                # Environment variables
-│   └── mail_accounts.json  # Email account configurations
-├── MD/                     # AI Context files (Soul, Tools, Memory)
-├── assets/                 # Static assets
-└── tmp/                    # Temporary files
+## Architecture Overview
+
+```mermaid
+graph TD
+    A["🚀 hclaw.js<br/><i>Entry Point</i>"] -->|"Loads .env & validates keys"| B["🟢 whatsappClient.js<br/><i>QR Auth · Self-chat only</i>"]
+    A -->|"Optional"| C["🔵 telegramClient.js<br/><i>Bot API · 3s polling</i>"]
+
+    B -->|"User message"| D["🧠 aiHandler.js<br/><i>AI Response Engine</i>"]
+    C -->|"User message"| D
+
+    D -->|"Loads context"| E["📄 MD Files<br/><i>SOUL · TOOLS · MEMORY</i>"]
+    D -->|"Selects model"| F["⚙️ Models.js<br/><i>Fallback chain · Model switching</i>"]
+    D -->|"Tool calls"| G["🔧 aiTools.js<br/><i>37 tools · executeTool()</i>"]
+
+    G --> H["💻 Shell<br/><i>Bash · PowerShell</i>"]
+    G --> I["📧 mailTools.js<br/><i>SMTP · IMAP</i>"]
+    G --> J["🎨 AI APIs<br/><i>Gemini · OpenAI · Whisper</i>"]
+    G --> K["📁 File System<br/><i>Read · Write · List</i>"]
+    G --> L["💬 Messaging<br/><i>WA Send · TG Send</i>"]
+
+    D -->|"Final reply"| B
+    D -->|"Final reply"| C
+
+    style A fill:#2d2d2d,stroke:#ff9800,color:#fff
+    style D fill:#1a237e,stroke:#42a5f5,color:#fff
+    style G fill:#1b5e20,stroke:#66bb6a,color:#fff
+    style E fill:#4a148c,stroke:#ab47bc,color:#fff
+    style F fill:#b71c1c,stroke:#ef5350,color:#fff
 ```
 
 ---
 
-## ✨ Key Features
+## Message Flow
 
-- **🧠 Multi-Model Intelligence**: Seamlessly switch between **Google Gemini** and **OpenAI GPT** models using simple slash commands.
-- **💬 Conversation Persistence**: Recent message history is automatically reinjected into the AI's context for every message, ensuring a smooth and coherent dialogue.
-- **📔 Persistent Memory (Facts)**:
-  - **Auto-Learning**: The bot determines when to save important information automatically based on the conversation flow.
-  - **On-Demand**: You can explicitly instruct the bot to "remember" or "forget" specific details through your messages.
-  - **Management**: A dedicated suite of tools allows the AI to **list**, **add**, **delete**, and **compact** facts to keep your memory file (`MEMORY.md`) organized and relevant.
-- **🛠️ Extensible Toolset**:
-  - **System Access**: Run Bash and PowerShell commands directly from WhatsApp.
-  - **Email Management**: Full MAPI/SMTP/IMAP access to send, receive, list, and organize emails across multiple accounts (Gmail, Outlook, Private etc.).
-  - **Social Integration**: Telegram client for sending/receiving messages and orchestrating notifications.
-  - **Media Generation**: Create DALL-E 3 images and TTS audio on the fly.
-  - **Media Analysis**: Advanced Vision and Whisper transcription for images, audio, and documents.
-- **🔒 Privacy First**: Strict bot-policy enforcement; H-Claw only responds in self-chats and never initiates external messages unless explicitly instructed.
-- **📦 Dynamic Tool Discovery**: Ability for bots to discover and save new tools/scripts to `TOOLS.md` for future use.
+```mermaid
+flowchart TD
+    Start(["📱 User sends message<br/><i>WhatsApp self-chat or Telegram</i>"]) --> Log["📋 Log message<br/><i>📤/📩 direction · sender · timestamp</i>"]
+    Log --> Filter{"🔒 Self-chat?<br/>Bot prefix?"}
+    Filter -->|"Not self-chat<br/>or bot reply"| Ignore(["🚫 Ignore"])
+    Filter -->|"Valid user msg"| Slash{"⌨️ Slash command?<br/><i>/help /wipe /switch</i>"}
+    Slash -->|"Yes"| Local["⚡ Handle locally<br/><i>No AI needed</i>"]
+    Slash -->|"No"| History["📜 Build chat history<br/><i>WA: 11 msgs · TG: 20 msgs</i>"]
+    History --> Media{"📎 Has media?"}
+    Media -->|"Yes"| Append["➕ Append read_media<br/>instruction to prompt"]
+    Media -->|"No"| AI
+    Append --> AI["🧠 generateAIResponse()"]
+
+    AI --> Prompt["📝 Build system prompt<br/><i>Platform + SOUL + TOOLS + MEMORY</i>"]
+    Prompt --> Provider{"🤖 Select provider"}
+    Provider -->|"Gemini"| GemAPI["💎 Gemini API"]
+    Provider -->|"OpenAI"| OAIAPI["🟢 OpenAI API"]
+
+    GemAPI --> ToolLoop{"🔄 Tool call<br/>returned?"}
+    OAIAPI --> ToolLoop
+
+    ToolLoop -->|"Yes"| Exec["🔧 executeTool()<br/><i>Run tool · get result</i>"]
+    Exec -->|"Append result<br/>loop back"| ToolLoop
+    ToolLoop -->|"No · final text"| Format["✨ Format reply<br/><i>WA bold/bullets or TG Markdown</i>"]
+
+    Format --> Send(["🐾 Send reply"])
+
+    AI -.->|"On error"| Fallback["🔄 Fallback to<br/>next model"]
+    Fallback --> AI
+
+    style Start fill:#1b5e20,stroke:#66bb6a,color:#fff
+    style AI fill:#1a237e,stroke:#42a5f5,color:#fff
+    style ToolLoop fill:#e65100,stroke:#ff9800,color:#fff
+    style Send fill:#1b5e20,stroke:#66bb6a,color:#fff
+    style Ignore fill:#616161,stroke:#9e9e9e,color:#fff
+```
 
 ---
 
-## 🚀 Installation & Setup
+## Project Structure
+
+```
+10L-H-Claw/
+├── hclaw.js                    # Entry point: loads .env, starts clients, handles shutdown
+├── src/
+│   ├── Models.js               # Model registry, fallback chain, image model config
+│   ├── aiHandler.js            # Gemini & OpenAI pipelines, tool-calling loop, token tracking
+│   ├── aiTools.js              # 37 tool schemas + executeTool() dispatcher
+│   ├── whatsappClient.js       # WhatsApp Web client, message listener, slash commands
+│   ├── telegramClient.js       # Telegram Bot API polling, cross-platform bridge
+│   ├── mailTools.js            # SMTP/IMAP email management (nodemailer + imapflow)
+│   └── serverTools.js          # Graceful shutdown orchestration
+├── MD/
+│   ├── SOUL.md                 # Bot personality (injected every request)
+│   ├── TOOLS.md                # Learned recipes & workflows (injected every request)
+│   ├── MEMORY.md               # Persistent user facts (injected every request)
+│   └── media/                  # Stored media referenced by MEMORY
+├── secrets/
+│   ├── .env                    # API keys & config (never committed)
+│   ├── .env.example            # Template for .env
+│   └── mail_accounts.json      # Email account credentials
+├── tmp/                        # Temporary files (generated images, downloads, audio)
+├── assets/                     # Logo, banner
+└── .wwebjs_auth/               # WhatsApp session persistence (auto-generated)
+```
+
+---
+
+## Key Features
+
+### Multi-Model Intelligence
+
+Seamlessly switch between **Google Gemini** and **OpenAI GPT** models. Models are configured as a fallback chain — if one fails, the next activates automatically.
+
+```env
+AI_FALLBACK_ORDER=gemini:gemini-3-flash-preview,gemini:gemini-3.1-pro-preview,chatgpt:gpt-4o
+```
+
+Image generation supports separate model ordering with multiple providers:
+
+```env
+IMAGE_GENERATION_ORDER=openai:dall-e-3;gemini:gemini-2.0-flash-preview-image-generation;imagen:imagen-3.0-generate-002
+```
+
+### Persistent Memory
+
+H-Claw maintains a fact-based memory system in `MEMORY.md`, injected into every AI request.
+
+- **Auto-Learning**: The AI decides when to save important info from conversation
+- **On-Demand**: Tell the bot to "remember" or "forget" specific details
+- **Media Memory**: Save images/files with descriptions for future reference
+- **Management**: List, add, edit, remove, and clear facts via tools
+
+### Conversation Persistence
+
+Recent message history is automatically re-injected into the AI context:
+- **WhatsApp**: Last 11 messages
+- **Telegram**: Last 20 messages per chat
+
+### 37 Built-in AI Tools
+
+The AI can autonomously choose and chain tools based on your request:
+
+| Category | Tools | Capabilities |
+|----------|-------|-------------|
+| **Shell** | `execute_bash`, `execute_powershell` | Run system commands with 15s timeout |
+| **Memory** | `memory_list/add/add_media/remove/edit/clear` | Persistent fact management |
+| **Files** | `file_read/write/append/list` | Local filesystem access |
+| **WhatsApp** | `whatsapp_send/reply/list_recent/list_contacts/send_media/read_media/download_media` | Full WhatsApp control |
+| **Telegram** | `telegram_send/list_recent/delete/send_media/read_media` | Full Telegram control |
+| **Email** | `mail_add_account/list_accounts/send_email/list_folders/list_messages/list_messages_all/get_message/delete_message/move_message` | Multi-account SMTP/IMAP |
+| **Media** | `generate_image`, `generate_audio` | Image generation (DALL-E/Gemini/Imagen), TTS |
+| **System** | `tool_save`, `server_stop` | Save learned workflows, shutdown |
+
+### Media Analysis
+
+- **Images/Documents/PDFs**: Uploaded to Gemini File API for vision analysis. If the active model is OpenAI, Gemini acts as a proxy reader.
+- **Audio/Voice Notes**: Transcribed via OpenAI Whisper
+
+### Dynamic Tool Discovery
+
+The bot can learn new capabilities during conversation and save them to `TOOLS.md` for future use. Ask it to create a script, validate it via shell, and persist the recipe.
+
+### Cross-Platform
+
+- **WhatsApp** (primary): Full integration via `whatsapp-web.js` with QR auth
+- **Telegram** (secondary): Bot API polling with media support and cross-platform notifications
+
+---
+
+## Slash Commands
+
+Processed locally without AI inference:
+
+| Command | Description |
+|---------|-------------|
+| `/help` | Show command menu |
+| `/wipe` | Delete bot messages from past 24h |
+| `/wipe tmp` | Clear temporary files directory |
+| `/list models` | Show all available AI models |
+| `/current model` | Display active model |
+| `/switch model <n>` | Switch AI model by index |
+| `/switch image model <n>` | Switch image generation model |
+| `/reset model` | Reset to default model |
+| `/list contacts [query]` | Search WhatsApp contacts |
+| `/stop` | Graceful shutdown |
+
+---
+
+## Installation & Setup
 
 ### Prerequisites
 
-- [Node.js](https://nodejs.org/) (v16+)
-- A WhatsApp account for the bot
-- API Keys for Google Gemini and OpenAI
-- (Optional) Telegram Bot Token & Chat ID for notifications
+- [Node.js](https://nodejs.org/) v16+
+- A WhatsApp account
+- At least one API key: Google Gemini or OpenAI
+- (Optional) Telegram Bot Token & Chat ID
 
 ### 1. Clone & Install
 
@@ -68,143 +212,74 @@ npm install
 
 ### 2. Configure Environment
 
-H-Claw uses template files for configuration. Copy the example files and fill in your credentials.
-
-#### API Keys & General Settings
-
-Copy `.env.example` to `.env` and fill in your API keys:
-
 ```bash
-cp .env.example .env
+cp secrets/.env.example secrets/.env
 ```
 
-Edit `.env`:
+Edit `secrets/.env`:
 
 ```env
-# AI API Keys
 GEMINI_API_KEY=your_gemini_key
 OPENAI_API_KEY=your_openai_key
+AI_FALLBACK_ORDER=gemini:gemini-3-flash-preview,chatgpt:gpt-4o
 
-# Fallback Order (Provider:Model)
-AI_FALLBACK_ORDER=gemini:gemini-3-flash-preview,gemini:gemini-3.1-pro-preview,chatgpt:gpt-4o
-
-# Telegram (Optional)
+# Optional
+IMAGE_GENERATION_ORDER=openai:dall-e-3;gemini:imagen-3
 TELEGRAM_BOT_TOKEN=your_bot_token
 TELEGRAM_CHAT_ID=your_chat_id
 ```
 
-#### Email Configuration (Optional)
-
-You can configure email accounts manually or **directly through conversation** with the bot:
-
-- **Manual**: Copy `mail_accounts.json.example` to `mail_accounts.json` and edit.
-- **Bot-Assisted**: Simply tell the bot: *"H-Claw, I want to add my Gmail account. Use these settings: [host, port, user, pass...]"*. The bot will use its file system tools to update your `mail_accounts.json` automatically.
-
-> [!WARNING]
-> Never commit your `.env` or `mail_accounts.json` files. They are included in `.gitignore` by default.
-
-### 3. Running H-Claw
+### 3. WhatsApp Setup
 
 ```bash
 node hclaw.js
 ```
 
----
+1. A QR code appears in the terminal
+2. Open WhatsApp → **Linked Devices** → **Link a Device**
+3. Scan the QR code — the bot is live
 
-## 📱 Communication Setup
+### 4. Telegram Setup (Optional)
 
-### 🟢 WhatsApp (Mandatory)
+1. Message [@BotFather](https://t.me/botfather) to create a bot and get your token
+2. Message [@userinfobot](https://t.me/userinfobot) to get your chat ID
+3. Add both to your `.env` file
 
-H-Claw uses `whatsapp-web.js` to mirror your account.
+### 5. Email Setup (Optional)
 
-1. Run `node hclaw.js`.
-2. A **QR Code** will appear in your terminal.
-3. Open WhatsApp on your phone → **Linked Devices** → **Link a Device**.
-4. Scan the terminal QR code. The bot is now live!
+Configure manually in `secrets/mail_accounts.json` or tell the bot: *"Add my Gmail account with these settings..."*
 
-### 🔵 Telegram (Optional)
-
-Used for secondary notifications and remote orchestration.
-
-1. Message [@BotFather](https://t.me/botfather) to create a bot and get your **Token**.
-2. Message [@userinfobot](https://t.me/userinfobot) to get your **Chat ID**.
-3. Add these to your `.env` file.
+> **Warning**: Never commit `.env` or `mail_accounts.json`. They are in `.gitignore` by default.
 
 ---
 
-## 🚀 Dynamic Expansion (Core Capability)
+## Technology Stack
 
-H-Claw's greatest power is its ability to **evolve**. Because it has direct access to Bash and PowerShell, it can create, test, and save new tools during a conversation.
-
-### How it Works
-
-1. **Request**: Ask for a new capability (e.g., "Add a tool to check my system's disk space and alert me if it's low").
-2. **Creation**: The bot writes a script, validates it via the shell, and uses `tool_save` to add the recipe to `MD/TOOLS.md`.
-3. **Persistence**: The bot now "knows" this tool and can use it in future sessions.
-
-### Example: Adding a System Monitor
->
-> **User**: *"H-Claw, add a tool that uses PowerShell to check my local weather using 'wttr.in'."*
->
-> **H-Claw**: *"I've successfully created and saved a new weather tool using `curl wttr.in?format=3`. You can now ask me for the weather anytime!"*
+| Component | Library | Purpose |
+|-----------|---------|---------|
+| WhatsApp | whatsapp-web.js | Web protocol via Puppeteer |
+| Telegram | Native Bot API (fetch) | HTTP long-polling |
+| Gemini AI | @google/genai | Text, vision, image generation, tool calling |
+| OpenAI | openai | GPT models, DALL-E, Whisper, TTS |
+| Email | nodemailer, imapflow | SMTP send, IMAP read/manage |
+| Shell | child_process | Bash & PowerShell execution |
+| Config | dotenv | Environment variables |
 
 ---
 
-## 🛠️ Bot Tool Classification
+## Privacy & Security
 
-### 1. Built-in Commands (Slash Commands)
-
-These are direct instructions you send to the bot. They are processed locally and do not require AI inference.
-
-| Command | Description |
-| :--- | :--- |
-| `/help` | Show the help menu with all available commands |
-| `/list commands` | Alias for `/help` |
-| `/wipe` | Delete all bot messages from the past 24 hours |
-| `/wipe tmp` | Delete all files in the `./tmp` directory |
-| `/list models` | Show all available AI models |
-| `/current model` | Display the model currently in use |
-| `/switch model <n>` | Switch the active AI model by its index |
-| `/reset model` | Reset to the default AI model |
-| `/list contacts [query]` | Search and list your WhatsApp contacts |
-| `/print` | Debug: Print internal model variables to console |
-| `/stop` | Gracefully shut down the server |
-
-### 2. Built-in AI Tools (Hardcoded Capabilities)
-
-These are specialized functions the AI can "choose" to use based on your request. They are defined in `aiTools.js`.
-
-- **Shell Tools**: `execute_bash`, `execute_powershell` (Execute system commands).
-- **Memory Tools**: `memory_list`, `memory_add`, `memory_add_media`, `memory_remove`, `memory_edit`, `memory_clear`.
-- **File System**: `file_read`, `file_write`, `file_append`, `file_list`.
-- **Email**: `mail_send_email`, `mail_list_messages`, `mail_get_message`, etc.
-- **WhatsApp Media**: `generate_image` (DALL-E), `generate_audio` (TTS), `whatsapp_read_media` (Vision/Whisper).
-- **Telegram**: `telegram_send`, `telegram_list_recent`, `telegram_read_media`.
-- **System**: `tool_save` (Saves "Learned Tools" to `TOOLS.md`).
-
-### 3. Learned Tools (Dynamic Recipes)
-
-These are "recipes" or complex workflows stored in `MD/TOOLS.md`. The AI consults this file to learn how to perform non-native tasks.
-
-- **OS Rules**: Context on when to use PowerShell vs Bash.
-- **YouTube Access**: Using `yt-dlp` to download audio or fetch video metadata directly from a URL.
-- **Web Reader**: How to use `lynx` or `links` to scrape websites.
-- **PC Alerts**: Commands for native OS notifications (e.g., `BurntToast` for Windows).
-- **Crypto Tracking**: Scripts to fetch real-time prices from public APIs like CoinGecko.
-- **Custom Workflows**: Any routine the AI has been taught to automate.
+- **Self-chat only**: H-Claw only responds in your own chat — never initiates external messages unless explicitly instructed
+- **Local session**: WhatsApp auth stored locally in `.wwebjs_auth/`
+- **No cloud storage**: Memory, tools, and soul files live on your machine
+- **Token tracking**: Cumulative token usage logged to console for billing awareness
 
 ---
 
-## 📐 Architecture
+## Roadmap
 
-H-Claw acts as an intelligent middleware, orchestrating requests between the `whatsapp-web.js` client and various AI provider APIs. It manages context via local Markdown files, ensuring your AI "knows" you better the more you use it.
-
----
-
-## 🔮 Roadmap & Future Additions
-
-- **💓 Heartbeat Service**: Implementation of a proactive "heartbeat" system allowing H-Claw to initiate conversations, provide timely reminders, and perform background checks without waiting for a user prompt.
-- **🎭 Personalities & Moods**: Expanded configuration for the bot's "Soul" to allow dynamic persona switching.
+- **Heartbeat Service**: Proactive reminders and background checks without waiting for user input
+- **Persona Switching**: Dynamic personality modes via expanded SOUL.md configuration
 
 ---
 
