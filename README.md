@@ -42,47 +42,6 @@ graph TD
 
 ---
 
-## Message Flow
-
-```mermaid
-flowchart TD
-    Start(["📱 User sends message<br/><i>WhatsApp self-chat or Telegram</i>"]) --> Log["📋 Log message<br/><i>📤/📩 direction · sender · timestamp</i>"]
-    Log --> Filter{"🔒 Self-chat?<br/>Bot prefix?"}
-    Filter -->|"Not self-chat<br/>or bot reply"| Ignore(["🚫 Ignore"])
-    Filter -->|"Valid user msg"| Slash{"⌨️ Slash command?<br/><i>/help /wipe /switch</i>"}
-    Slash -->|"Yes"| Local["⚡ Handle locally<br/><i>No AI needed</i>"]
-    Slash -->|"No"| History["📜 Build chat history<br/><i>WA: 11 msgs · TG: 20 msgs</i>"]
-    History --> Media{"📎 Has media?"}
-    Media -->|"Yes"| Append["➕ Append read_media<br/>instruction to prompt"]
-    Media -->|"No"| AI
-    Append --> AI["🧠 generateAIResponse()"]
-
-    AI --> Prompt["📝 Build system prompt<br/><i>Platform + SOUL + TOOLS + MEMORY</i>"]
-    Prompt --> Provider{"🤖 Select provider"}
-    Provider -->|"Gemini"| GemAPI["💎 Gemini API"]
-    Provider -->|"OpenAI"| OAIAPI["🟢 OpenAI API"]
-
-    GemAPI --> ToolLoop{"🔄 Tool call<br/>returned?"}
-    OAIAPI --> ToolLoop
-
-    ToolLoop -->|"Yes"| Exec["🔧 executeTool()<br/><i>Run tool · get result</i>"]
-    Exec -->|"Append result<br/>loop back"| ToolLoop
-    ToolLoop -->|"No · final text"| Format["✨ Format reply<br/><i>WA bold/bullets or TG Markdown</i>"]
-
-    Format --> Send(["🐾 Send reply"])
-
-    AI -.->|"On error"| Fallback["🔄 Fallback to<br/>next model"]
-    Fallback --> AI
-
-    style Start fill:#1b5e20,stroke:#66bb6a,color:#fff
-    style AI fill:#1a237e,stroke:#42a5f5,color:#fff
-    style ToolLoop fill:#e65100,stroke:#ff9800,color:#fff
-    style Send fill:#1b5e20,stroke:#66bb6a,color:#fff
-    style Ignore fill:#616161,stroke:#9e9e9e,color:#fff
-```
-
----
-
 ## Project Structure
 
 ```
@@ -140,6 +99,7 @@ H-Claw maintains a fact-based memory system in `MEMORY.md`, injected into every 
 ### Conversation Persistence
 
 Recent message history is automatically re-injected into the AI context:
+
 - **WhatsApp**: Last 11 messages
 - **Telegram**: Last 20 messages per chat
 
