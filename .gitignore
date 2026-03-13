@@ -1,14 +1,11 @@
 node_modules/
 .wwebjs_auth/
 .wwebjs_cache/
-.env
-mail_accounts.json
 *.log
 tmp/
-.gitignore
 secrets/.env
 secrets/.env1
 secrets/mail_accounts.json
 secrets/mail_accounts.json1
-MD/MEMORY.MD
-MD/TOOLS.MD
+MD/MEMORY.md
+MD/TOOLS.md
