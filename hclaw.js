@@ -1,5 +1,6 @@
 const path = require('path');
 const fs = require('fs');
+require('./src/loggerTool');
 
 const envPath = path.join(__dirname, 'secrets', '.env');
 if (!fs.existsSync(envPath)) {
@@ -27,8 +28,15 @@ if (!fs.existsSync(envPath)) {
 }
 
 require('dotenv').config({ path: envPath, quiet: true });
+
+const envBotPath = path.join(__dirname, 'secrets', '.env_bot');
+if (fs.existsSync(envBotPath)) {
+    require('dotenv').config({ path: envBotPath, override: true });
+}
 const { initializeWhatsAppClient } = require('./src/whatsappClient');
 const { initializeTelegramClient } = require('./src/telegramClient');
+const queueFile = path.join(__dirname, 'tmp', 'onboard_ui_queue.jsonl');
+let queueReadOffset = 0;
 
 console.log(`🐾 WhatsApp AI Assistant initializing 🐾`);
 
@@ -44,13 +52,206 @@ if (!process.env.OPENAI_API_KEY || process.env.OPENAI_API_KEY.toUpperCase().incl
     console.log('🤖 OpenAI API key loaded.');
 }
 
+const { initializeOnboardClient, handleOnboardDashboardMessage } = require('./src/onboardClient');
 
+// Switch to default bot model from .env_bot on startup
+const defaultModel = process.env.DEFAULT_BOT_MODEL;
+if (defaultModel) {
+    try {
+        const { switchModelByNumber } = require('./src/Models');
+        switchModelByNumber(parseInt(defaultModel, 10));
+        console.log(`🎯 Initial model set from .env_bot to #${defaultModel}`);
+    } catch(e) {}
+}
+
+const defaultImageModel = process.env.DEFAULT_IMAGE_MODEL;
+if (defaultImageModel) {
+    try {
+        const { switchImageModelByNumber } = require('./src/Models');
+        switchImageModelByNumber(parseInt(defaultImageModel, 10));
+        console.log(`🎨 Initial Image model set from .env_bot to #${defaultImageModel}`);
+    } catch(e) {}
+}
 
 const whatsappClient = initializeWhatsAppClient();
 initializeTelegramClient(whatsappClient);
+initializeOnboardClient(whatsappClient);
+
+try {
+    fs.mkdirSync(path.dirname(queueFile), { recursive: true });
+    if (!fs.existsSync(queueFile)) fs.writeFileSync(queueFile, '', 'utf8');
+    queueReadOffset = fs.statSync(queueFile).size;
+} catch (error) {
+    queueReadOffset = 0;
+}
+
+async function handleSettingsUpdate(settings) {
+    const s = settings || {};
+    if (s.historyLimit !== undefined) {
+        process.env.BOT_LOG_HISTORY_LIMIT = s.historyLimit;
+    }
+    if (s.defaultBotModel !== undefined) {
+        try {
+            const { switchModelByNumber } = require('./src/Models');
+            switchModelByNumber(parseInt(s.defaultBotModel, 10));
+        } catch (e) {
+        }
+    }
+    if (s.defaultImageModel !== undefined) {
+        try {
+            const { switchImageModelByNumber } = require('./src/Models');
+            switchImageModelByNumber(parseInt(s.defaultImageModel, 10));
+        } catch (e) {
+        }
+    }
+}
+
+async function handleSendMessage(msg) {
+    const { getWhatsappClient, MessageMedia } = require('./src/whatsappClient');
+    const { isTelegramActive, sendTelegramMedia } = require('./src/telegramClient');
+    const { appendBotLog } = require('./src/loggerTool');
+    const { platform, target, text, image_path: imagePath, history_limit: historyLimit } = msg;
+    const cleanedText = typeof text === 'string' ? text.trim() : '';
+    const lowerText = cleanedText.toLowerCase();
+
+    try {
+        if (platform === 'onboard') {
+            await handleOnboardDashboardMessage({
+                type: 'send_msg',
+                platform,
+                text,
+                image_path: imagePath,
+                history_limit: historyLimit
+            }, whatsappClient);
+            return;
+        }
+
+        if (platform === 'whatsapp') {
+            const client = getWhatsappClient();
+            if (client) {
+                let waId = target;
+                if (!waId) {
+                    waId = client.info && client.info.wid && client.info.wid._serialized;
+                }
+                if (waId) {
+                    const selfChatId = client.info && client.info.wid && client.info.wid._serialized;
+                    if (!waId.includes('@')) {
+                        waId = waId.includes('-') ? `${waId}@g.us` : `${waId}@c.us`;
+                    }
+                    if (imagePath) {
+                        const media = MessageMedia.fromFilePath(imagePath);
+                        await client.sendMessage(waId, media, cleanedText ? { caption: text } : undefined);
+                    } else {
+                        await client.sendMessage(waId, text);
+                    }
+                    if (
+                        (cleanedText || imagePath) &&
+                        waId !== selfChatId &&
+                        !lowerText.includes('h-claw started!') &&
+                        !lowerText.includes('h-claw stopped!') &&
+                        lowerText !== '/stop' &&
+                        !cleanedText.startsWith('/')
+                    ) {
+                        appendBotLog(`👤 ${cleanedText || '(image only)'}`);
+                    }
+                    console.log(`📤 [IPC] Sent WA to ${waId}`);
+                } else {
+                    console.error('❌ [IPC] Failed to send WA: Client not ready or target missing');
+                }
+            }
+            return;
+        }
+
+        if (platform === 'telegram') {
+            const tgId = target || process.env.TELEGRAM_CHAT_ID;
+            if (!tgId) {
+                console.error('❌ [IPC] Failed to send TG: No target or TELEGRAM_CHAT_ID provided');
+                return;
+            }
+            if (isTelegramActive()) {
+                if (imagePath) {
+                    await sendTelegramMedia(tgId, imagePath, cleanedText);
+                    if (
+                        (cleanedText || imagePath) &&
+                        !lowerText.includes('h-claw started!') &&
+                        !lowerText.includes('h-claw stopped!') &&
+                        lowerText !== '/stop' &&
+                        !cleanedText.startsWith('/')
+                    ) {
+                        appendBotLog(`👤 ${cleanedText || '(image only)'}`);
+                    }
+                    console.log(`📤 [IPC] Sent TG media to ${tgId}`);
+                } else {
+                    const { processIncomingTelegramMessage } = require('./src/telegramClient');
+                    await processIncomingTelegramMessage(tgId, text);
+                    console.log(`📤 [IPC] Processed TG trigger for ${tgId}`);
+                }
+            }
+        }
+    } catch (e) {
+        console.error(`❌ [IPC] Failed to send message:`, e.message);
+    } finally {
+        if (imagePath && platform !== 'onboard' && fs.existsSync(imagePath)) {
+            try {
+                fs.unlinkSync(imagePath);
+            } catch (cleanupError) {
+            }
+        }
+    }
+}
+
+async function processQueuedCommands() {
+    try {
+        if (!fs.existsSync(queueFile)) return;
+        const stats = fs.statSync(queueFile);
+        if (stats.size <= queueReadOffset) return;
+
+        const handle = await fs.promises.open(queueFile, 'r');
+        try {
+            const length = stats.size - queueReadOffset;
+            const buffer = Buffer.alloc(length);
+            await handle.read(buffer, 0, length, queueReadOffset);
+            queueReadOffset = stats.size;
+
+            const lines = buffer.toString('utf8').split(/\r?\n/).filter(Boolean);
+            for (const line of lines) {
+                try {
+                    const payload = JSON.parse(line);
+                    if (payload.type === 'send_msg') {
+                        await handleSendMessage(payload);
+                    } else if (payload.type === 'update_settings') {
+                        await handleSettingsUpdate(payload.settings);
+                    }
+                } catch (error) {
+                    console.error('Queue payload error:', error.message);
+                }
+            }
+        } finally {
+            await handle.close();
+        }
+    } catch (error) {
+        console.error('Queue processing error:', error.message);
+    }
+}
+
+setInterval(() => {
+    processQueuedCommands();
+}, 700);
 
 // Handle graceful shutdown globally
 process.on('SIGINT', async () => {
     const { stopServer } = require('./src/serverTools');
     await stopServer();
+});
+
+// Handle IPC messages from Admin Server
+process.on('message', async (msg) => {
+    if (msg === 'stop' || msg.type === 'stop') {
+        const { stopServer } = require('./src/serverTools');
+        await stopServer();
+    } else if (msg.type === 'update_settings') {
+        await handleSettingsUpdate(msg.settings);
+    } else if (msg.type === 'send_msg') {
+        await handleSendMessage(msg);
+    }
 });

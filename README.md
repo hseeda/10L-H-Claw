@@ -246,3 +246,4 @@ Configure manually in `secrets/mail_accounts.json` or tell the bot: *"Add my Gma
 <p align="center">
   <i>"Connecting your digital life through the paw of an AI."</i>
 </p>
+

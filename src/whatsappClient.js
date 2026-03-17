@@ -1,12 +1,45 @@
-const { Client, LocalAuth } = require('whatsapp-web.js');
+const { Client, LocalAuth, MessageMedia } = require('whatsapp-web.js');
 const qrcode = require('qrcode-terminal');
 const { generateAIResponse } = require('./aiHandler');
 const { getActiveModel, getAvailableModels, getCurrentModelInfo, getAvailableModelsList, resetToDefaultModel, switchModelByNumber, switchImageModelByNumber, printModelVariables } = require('./Models');
 
 let client = null;
+let whatsappRuntimeStatus = 'initializing';
+const historyHandler = require('./historyHandler');
 
 function getWhatsappClient() {
     return client;
+}
+
+function getWhatsAppStatus() {
+    const info = {
+        status: whatsappRuntimeStatus,
+        connected: whatsappRuntimeStatus === 'ready',
+        hasClient: !!client,
+        wid: client?.info?.wid?._serialized || null,
+    };
+
+    if (info.connected) {
+        return `WhatsApp status: READY${info.wid ? ` (${info.wid})` : ''}.`;
+    }
+
+    if (info.status === 'qr') {
+        return 'WhatsApp status: QR_PENDING. A QR code was generated and still needs to be scanned.';
+    }
+
+    if (info.status === 'authenticated') {
+        return 'WhatsApp status: AUTHENTICATED. Session is authenticated and waiting to become ready.';
+    }
+
+    if (info.status === 'auth_failure') {
+        return 'WhatsApp status: AUTH_FAILURE. The saved WhatsApp session failed authentication.';
+    }
+
+    if (info.status === 'disconnected') {
+        return 'WhatsApp status: DISCONNECTED. The WhatsApp client is not currently connected.';
+    }
+
+    return `WhatsApp status: ${String(info.status || 'unknown').toUpperCase()}.`;
 }
 
 /**
@@ -75,7 +108,26 @@ async function logMessageFormatted(msg) {
     const tagStr = tags.length ? ` ${tags.join('')}` : '';
 
     const body = (msg.body || '').split('\n')[0].substring(0, 120) || '(empty)';
-    console.log(`${icon} WA ${dir}${tagStr} │ ${who} │ ${time} │ ${body}`);
+    const logLine = `${icon} WA ${dir}${tagStr} │ ${who} │ ${time} │ ${body}`;
+    console.log(logLine);
+    
+    // Log "from me to me" to bot_log.txt
+    if (isSelf) {
+        const bodyText = msg.body || '';
+        const lowerText = bodyText.trim().toLowerCase();
+        if (lowerText.includes('h-claw started!') || lowerText.includes('h-claw stopped!') || lowerText === '/stop') {
+             return;
+        }
+        if (!isOut && bodyText.startsWith('/')) return; // Skip input command
+        if (isHandlingCommand) return; // Skip reply
+
+        const { appendBotLog } = require('./loggerTool');
+        let logText = bodyText || '(empty)';
+        if (!isOut) {
+            logText = `👤 ${logText}`;
+        }
+        appendBotLog(logText);
+    }
 }
 
 async function cleanUpMessages(msg) {
@@ -158,6 +210,7 @@ async function listContacts(msg) {
 async function listCommands(msg) {
     const reply = `🐾 *Commands:*\n` +
         `📖 */help* — This menu\n` +
+        `📖 */get history* — Show chat history\n` +
         `🌀 */wipe* — Wipe messages (24h)\n` +
         `🗑️ */wipe tmp* — Clear tmp files\n` +
         `📋 */list models* — All models\n` +
@@ -171,10 +224,19 @@ async function listCommands(msg) {
     await client.sendMessage(msg.to, reply);
 }
 
+let isHandlingCommand = false;
+
 async function builtInCommands(msg) {
+    isHandlingCommand = true;
+    try {
     const cmd = msg.body.trim().toLowerCase();
     if (cmd === '/help' || cmd === '/list commands') {
         await listCommands(msg);
+        return true;
+    }
+    if (cmd === '/get history') {
+        const historyText = await historyHandler.getHistory('whatsapp', msg);
+        await client.sendMessage(msg.to, historyText || '🐾 No history found.');
         return true;
     }
 
@@ -237,11 +299,15 @@ async function builtInCommands(msg) {
         stopServer();
         return true;
     }
-    return false;
+        return false;
+    } finally {
+        isHandlingCommand = false;
+    }
 }
 
 function initializeWhatsAppClient() {
     client = null;
+    whatsappRuntimeStatus = 'initializing';
 
     client = new Client({
         authStrategy: new LocalAuth(),
@@ -251,12 +317,14 @@ function initializeWhatsAppClient() {
     });
 
     client.on('qr', (qr) => {
+        whatsappRuntimeStatus = 'qr';
         // Generate and scan this code with your phone
         console.log('QR RECEIVED. Scan the code below:');
         qrcode.generate(qr, {small: true});
     });
 
     client.on('ready', async () => {
+        whatsappRuntimeStatus = 'ready';
         console.log('✅ WhatsApp Client is ready! 🚀');
         try {
             const selfChatId = client.info.wid._serialized;
@@ -283,11 +351,18 @@ function initializeWhatsAppClient() {
 
     // WhatsApp Client authenticated successfully.
     client.on('authenticated', () => {
+        whatsappRuntimeStatus = 'authenticated';
         console.log('🔐 WhatsApp Client authenticated successfully.');
     });
 
     client.on('auth_failure', msg => {
+        whatsappRuntimeStatus = 'auth_failure';
         console.error('🔐 WhatsApp Client authentication failure:', msg);
+    });
+
+    client.on('disconnected', (reason) => {
+        whatsappRuntimeStatus = 'disconnected';
+        console.warn('⚠️ WhatsApp Client disconnected:', reason);
     });
 
     // Listen to all created messages (incoming AND outgoing)
@@ -313,19 +388,7 @@ function initializeWhatsAppClient() {
         if (isSelf && await builtInCommands(msg)) return;
         let model = getActiveModel();
         try {
-            const chat = await msg.getChat();
-            // Fetch last 11 messages (10 history + current message)
-            const recentMessages = await chat.fetchMessages({ limit: 11 }); 
-            const historyStrings = [];
-            for (const m of recentMessages) {
-                if (m.id._serialized === msg.id._serialized) continue; 
-                
-                // Identify bot messages
-                const isBot = m.body.startsWith('🐾') || m.body.startsWith('ℹ️') || m.body.startsWith('❌');
-                const prefix = isBot ? "H-Claw" : "User";
-                historyStrings.push(`[${new Date(m.timestamp * 1000).toLocaleString()}] ${prefix}: ${m.body}`);
-            }
-            const chatHistory = historyStrings.join('\n');
+            const chatHistory = await historyHandler.getHistory('whatsapp', msg);
 
             // Only take commands/replies if isSelf is true (already filtered above)
             let prompt = msg.body;
@@ -351,5 +414,7 @@ function initializeWhatsAppClient() {
 
 module.exports = { 
     initializeWhatsAppClient,
-    getWhatsappClient
+    getWhatsappClient,
+    getWhatsAppStatus,
+    MessageMedia,
 };

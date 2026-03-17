@@ -74,6 +74,73 @@ const S = (d) => ({ type: "STRING", description: d });
 const I = (d) => ({ type: "INTEGER", description: d });
 const B = (d) => ({ type: "BOOLEAN", description: d });
 
+function detectMimeTypeFromPath(filePath) {
+  const ext = path.extname(String(filePath || "")).toLowerCase();
+  if (ext === ".png") return "image/png";
+  if (ext === ".jpg" || ext === ".jpeg") return "image/jpeg";
+  if (ext === ".webp") return "image/webp";
+  if (ext === ".gif") return "image/gif";
+  if (ext === ".bmp") return "image/bmp";
+  if (ext === ".svg") return "image/svg+xml";
+  if (ext === ".pdf") return "application/pdf";
+  if (ext === ".txt" || ext === ".md") return "text/plain";
+  return "application/octet-stream";
+}
+
+async function analyzeLocalMediaFile(filePath, mimeType = "") {
+  if (!filePath || !fs.existsSync(filePath)) {
+    return `❌ Local media not found: ${filePath}`;
+  }
+
+  const resolvedMimeType = mimeType || detectMimeTypeFromPath(filePath);
+
+  if (resolvedMimeType.startsWith("audio/")) {
+    if (!internalOpenAI) return "❌ OpenAI (Whisper) not configured.";
+    const transcription = await internalOpenAI.audio.transcriptions.create({
+      file: fs.createReadStream(filePath),
+      model: "whisper-1",
+    });
+    return `🎙️ Local Audio Transcription: "${transcription.text}"`;
+  }
+
+  if (!fileManager || !geminiToolClient) {
+    return "❌ Gemini File Manager not configured.";
+  }
+
+  const uploadResult = await fileManager.upload({
+    file: filePath,
+    mimeType: resolvedMimeType,
+  });
+
+  const { getActiveModel, getAvailableModels } = require("./Models");
+  const activeModelProvider = getActiveModel().provider;
+
+  if (activeModelProvider === "openai" || activeModelProvider === "chatgpt") {
+    const prompt = "Describe this file in explicit detail. Omit talk.";
+    const availableModels = getAvailableModels();
+    const defaultModelEntry = availableModels.find(m => m.startsWith("gemini:")) || availableModels[0];
+    if (!defaultModelEntry) return "❌ No models configured.";
+    const defaultModel = defaultModelEntry.split(":")[1] || defaultModelEntry;
+
+    const proxyResponse = await geminiToolClient.models.generateContent({
+      model: defaultModel,
+      contents: [{
+        role: "user",
+        parts: [
+          { fileData: { mimeType: resolvedMimeType, fileUri: uploadResult.uri } },
+          { text: prompt },
+        ],
+      }],
+    });
+    try { await fileManager.delete({ name: uploadResult.name }); } catch (err) {}
+    return `📄 [LOCAL MEDIA ANALYSIS]\n${proxyResponse.text}`;
+  }
+
+  return `[FILE_URI_ATTACHMENT]
+MimeType: ${resolvedMimeType}
+FileUri: ${uploadResult.uri}`;
+}
+
 const customToolsSchema = [
   { name: "execute_bash", description: "Bash cmd", parameters: P({ command: S("c") }, ["command"]) },
   { name: "execute_powershell", description: "PowerShell cmd", parameters: P({ command: S("c") }, ["command"]) },
@@ -93,7 +160,7 @@ const customToolsSchema = [
   { name: "whatsapp_list_contacts", description: "Search WA contacts", parameters: P({ query: S("q") }) },
   { name: "whatsapp_reply", description: "Reply WA msg", parameters: P({ message_id: S("id"), message: S("t") }, ["message_id", "message"]) },
   { name: "generate_image", description: "Gen/edit image; image_path for img2img", parameters: P({ prompt: S("p"), image_path: S("src") }, ["prompt"]) },
-  { name: "generate_audio", description: "TTS", parameters: P({ text: S("t"), voice: S("alloy|echo|fable|onyx|nova|shimmer") }, ["text", "voice"]) },
+  { name: "generate_audio", description: "Text-to-speech. Provide spoken text in text, input, prompt, or message. Voice is optional.", parameters: P({ text: S("Speech text"), input: S("Speech text alias"), prompt: S("Speech text alias"), message: S("Speech text alias"), voice: S("alloy|echo|fable|onyx|nova|shimmer") }, ["text"]) },
   { name: "whatsapp_send_media", description: "Send WA media", parameters: P({ target_id: S("phone"), file_path: S("p"), caption: S("c") }, ["target_id", "file_path"]) },
   { name: "whatsapp_read_media", description: "AI-read WA media", parameters: P({ message_id: S("id") }, ["message_id"]) },
   { name: "whatsapp_download_media", description: "Download WA media", parameters: P({ message_id: S("id"), filename: S("n") }, ["message_id"]) },
@@ -111,6 +178,7 @@ const customToolsSchema = [
   { name: "telegram_delete", description: "Delete TG msg", parameters: P({ chat_id: S("c"), message_id: I("m") }, ["chat_id", "message_id"]) },
   { name: "telegram_send_media", description: "Send TG media", parameters: P({ chat_id: S("c"), file_path: S("p"), caption: S("cap") }, ["chat_id", "file_path"]) },
   { name: "telegram_read_media", description: "AI-read TG media", parameters: P({ chat_id: S("c"), message_id: I("m") }, ["chat_id", "message_id"]) },
+  { name: "read_local_media", description: "Read a local image, audio file, or document from disk for analysis", parameters: P({ file_path: S("Absolute or relative file path") }, ["file_path"]) },
   { name: "server_stop", description: "Shutdown" },
 ];
 
@@ -485,7 +553,7 @@ async function executeTool(name, args, client = null, platform = 'whatsapp') {
               response_format: "b64_json",
             });
           }
-          const imgData = response.data[0].b64_json || response.data[0].b64_json;
+          const imgData = response.data[0].b64_json;
           if (!imgData && response.data[0].url) {
             // Some edit responses return URL instead of b64
             const imgResp = await fetch(response.data[0].url);
@@ -574,10 +642,21 @@ async function executeTool(name, args, client = null, platform = 'whatsapp') {
   if (name === "generate_audio") {
     if (!internalOpenAI) return `❌ OpenAI Client not configured.`;
     try {
+      const speechInput = [
+        args?.text,
+        args?.input,
+        args?.prompt,
+        args?.message,
+      ].find((value) => typeof value === "string" && value.trim().length > 0);
+
+      if (!speechInput) {
+        return "❌ Audio Gen Error: missing speech text. Expected one of: text, input, prompt, or message.";
+      }
+
       const mp3 = await internalOpenAI.audio.speech.create({
         model: "tts-1",
         voice: args.voice || "alloy",
-        input: args.text,
+        input: speechInput.trim(),
       });
       const buffer = Buffer.from(await mp3.arrayBuffer());
       const fn = `audio_${Date.now()}.mp3`;
@@ -655,7 +734,7 @@ async function executeTool(name, args, client = null, platform = 'whatsapp') {
         // Clean up temporary file
         fs.unlinkSync(fp);
 
-        const { getActiveModel } = require("./Models");
+        const { getActiveModel, getAvailableModels } = require("./Models");
         const activeModelProvider = getActiveModel().provider;
 
         // If the main model is OpenAI, OpenAI cannot read Google's File_URIs.
@@ -669,8 +748,13 @@ async function executeTool(name, args, client = null, platform = 'whatsapp') {
 
           const prompt = "Describe this file in explicit detail. Omit talk.";
 
+          const availableModels = getAvailableModels();
+          const defaultModelEntry = availableModels.find(m => m.startsWith("gemini:")) || availableModels[0];
+          if (!defaultModelEntry) return "❌ No models configured.";
+          const defaultModel = defaultModelEntry.split(":")[1] || defaultModelEntry;
+
           const proxyResponse = await geminiToolClient.models.generateContent({
-            model: "gemini-1.5-flash",
+            model: defaultModel,
             contents: [
               {
                 role: "user",
@@ -937,13 +1021,18 @@ FileUri: ${uploadResult.uri}`;
             });
             fs.unlinkSync(fp);
 
-            const { getActiveModel } = require("./Models");
+            const { getActiveModel, getAvailableModels } = require("./Models");
             const activeModelProvider = getActiveModel().provider;
 
             if (activeModelProvider === "openai" || activeModelProvider === "chatgpt") {
                 const prompt = "Describe this file in explicit detail. Omit talk.";
+                const availableModels = getAvailableModels();
+                const defaultModelEntry = availableModels.find(m => m.startsWith("gemini:")) || availableModels[0];
+                if (!defaultModelEntry) return "❌ No models configured.";
+                const defaultModel = defaultModelEntry.split(":")[1] || defaultModelEntry;
+
                 const proxyResponse = await geminiToolClient.models.generateContent({
-                    model: "gemini-1.5-flash",
+                    model: defaultModel,
                     contents: [{ role: "user", parts: [{ fileData: { mimeType: mimetype, fileUri: uploadResult.uri } }, { text: prompt }] }],
                 });
                 try { await fileManager.delete({ name: uploadResult.name }); } catch (err) {}
@@ -955,6 +1044,15 @@ FileUri: ${uploadResult.uri}`;
             return `❌ Telegram Read Media Error: ${e.message}`;
         }
     }
+
+  }
+
+  if (name === "read_local_media") {
+    try {
+      return await analyzeLocalMediaFile(args.file_path);
+    } catch (e) {
+      return `❌ Local Media Error: ${e.message}`;
+    }
   }
 
   return `Unknown tool: ${name}`;
@@ -964,5 +1062,6 @@ module.exports = {
   GEMINI_TOOLS,
   OPENAI_TOOLS,
   executeTool,
+  analyzeLocalMediaFile,
   wipeTmpDirectory,
 };

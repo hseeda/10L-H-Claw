@@ -17,8 +17,9 @@ const toolsPath  = path.join(__dirname, '..', 'MD', 'TOOLS.md');
 const soulPath   = path.join(__dirname, '..', 'MD', 'SOUL.md');
 
 const PLATFORM_PROMPTS = {
-    whatsapp: "You are H-Claw, a concise AI assistant. Platform: WhatsApp. Use whatsapp_* tools only.",
-    telegram: "You are H-Claw, a concise AI assistant. Platform: Telegram. Use telegram_* tools only."
+    whatsapp: "You are H-Claw, a concise AI assistant. Platform: WhatsApp. Do NOT use whatsapp_send/whatsapp_reply to reply to the current dialogue; return text directly instead. Use tools only for other chats.",
+    telegram: "You are H-Claw, a concise AI assistant. Platform: Telegram. Do NOT use telegram_send to reply to the current dialogue; return text directly instead. Use tools only for other chats.",
+    onboard: "You are H-Claw, a concise AI assistant. Platform: OB Dashboard. You can use tools relevant to system admin."
 };
 
 function getSystemPrompt(platform = 'whatsapp') {
@@ -172,12 +173,19 @@ async function generateAIResponse(prompt, isSelf = false, client = null, chatHis
   let provider = model.provider;
   let modelName = model.model;
 
+  const { getBotLogHistory } = require('./historyHandler');
+  const botLog = getBotLogHistory();
+  let appendedHistory = chatHistory;
+  if (botLog) {
+      appendedHistory = `[GLOBAL BOT LOGS (context only)]\n${botLog}\n\n${chatHistory || ''}`;
+  }
+
   try {
     //++++++++++++++++++++++++++++++
     if (provider === "gemini") {
-      return await getGeminiResponse(modelName, prompt, client, chatHistory, platform);
+      return await getGeminiResponse(modelName, prompt, client, appendedHistory, platform);
     } else if (provider === "chatgpt" || provider === "openai") {
-      return await getOpenAIResponse(modelName, prompt, client, chatHistory, platform);
+      return await getOpenAIResponse(modelName, prompt, client, appendedHistory, platform);
     } else {
       console.warn(`Unknown provider: ${provider}`);
     }

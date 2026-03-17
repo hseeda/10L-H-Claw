@@ -3,9 +3,16 @@ const path = require('path');
 // aiHandler is lazy-loaded in initializeTelegramBot to avoid circular dependency
 const { getActiveModel, getAvailableModels, getCurrentModelInfo, getAvailableModelsList, resetToDefaultModel, switchModelByNumber, switchImageModelByNumber } = require('./Models');
 
-const telegramHistory = {}; // Store history per chat ID
+const historyHandler = require('./historyHandler');
+
 let activeMessages = []; // Track { chatId, messageId, timestamp } for /wipe
 let highestMessageId = 0;
+let lastKnownUserName = "User";
+let globalWhatsappClient = null;
+
+function getLastKnownUserName() {
+    return lastKnownUserName;
+}
 
 /**
  * Format AI markdown output for Telegram Markdown V1.
@@ -85,7 +92,7 @@ const tgClient = {
      * Sends a message to a Telegram chat using the Bot API.
      * Includes a fallback to plaintext if Markdown parsing fails.
      */
-    async sendTelegramMessage(chatId, text, useMarkdown = true) {
+    async sendTelegramMessage(chatId, text, useMarkdown = true, logMessage = true) {
         const token = process.env.TELEGRAM_BOT_TOKEN;
         if (!token) throw new Error('TELEGRAM_BOT_TOKEN is missing in .env');
 
@@ -126,7 +133,7 @@ const tgClient = {
                     timestamp: Math.floor(Date.now() / 1000)
                 });
 
-                logTelegramMessage(data.result, null, true);
+                if (logMessage) logTelegramMessage(data.result, null, true);
             }
 
             return data;
@@ -293,12 +300,30 @@ function logTelegramMessage(msg, mediaInfo = null, isOut = false) {
     const media = mediaInfo ? ` 📎${mediaInfo.type}` : '';
     const text = msg.text || msg.caption || '(empty)';
     const body = text.split('\n')[0].substring(0, 120);
-    console.log(`${icon} TG ${dir}${media} │ ${who} │ ${time} │ #${msg.message_id} │ ${body}`);
+    const logLine = `${icon} TG ${dir}${media} │ ${who} │ ${time} │ #${msg.message_id} │ ${body}`;
+    console.log(logLine);
+    
+    const lowerText = (text || '').trim().toLowerCase();
+    if (lowerText.includes('h-claw started!') || lowerText.includes('h-claw stopped!') || lowerText === '/stop') {
+         return;
+    }
+
+    if (!isOut && text.startsWith('/')) return; // Skip input command
+    if (isHandlingCommand) return; // Skip reply
+
+    // Log to bot_log.txt
+    const { appendBotLog } = require('./loggerTool');
+    let logText = text || '(empty)';
+    if (!isOut) {
+        logText = `👤 ${logText}`;
+    }
+    appendBotLog(logText);
 }
 
 async function listCommands(chatId) {
     const reply = `🐾 *Commands:*\n` +
         `📖 \`/help\` — This menu\n` +
+        `📖 \`/get history\` — Show chat history\n` +
         `📋 \`/list models\` — All models\n` +
         `🎯 \`/current model\` — Active model\n` +
         `♻️ \`/reset model\` — Reset model\n` +
@@ -359,15 +384,24 @@ async function deepWipe(chatId) {
 
     // Clear local tracking and history for this chat
     activeMessages = activeMessages.filter(m => String(m.chatId) !== String(chatId));
-    delete telegramHistory[chatId];
+    historyHandler.clearHistory('telegram', chatId);
 
     await tgClient.sendTelegramMessage(chatId, `ℹ️ *Deep Wipe complete!* Cleared approx ${deletedCount} message positions.`);
     console.log(`ℹ️ Telegram Deep Wipe complete for ${chatId}! Total cleared: ${deletedCount}`);
 }
 
+let isHandlingCommand = false;
+
 async function builtInCommands(chatId, text) {
+    isHandlingCommand = true;
+    try {
     const cmd = text.trim().toLowerCase();
     if (cmd === '/help' || cmd === '/list commands') { await listCommands(chatId); return true; }
+    if (cmd === '/get history') {
+        const historyText = await historyHandler.getHistory('telegram', chatId);
+        await tgClient.sendTelegramMessage(chatId, historyText || '🐾 No history found.');
+        return true;
+    }
     if (cmd === '/list models') {
         const reply = getAvailableModelsList();
         await tgClient.sendTelegramMessage(chatId, reply);
@@ -407,7 +441,10 @@ async function builtInCommands(chatId, text) {
         await stopServer();
         return true;
     }
-    return false;
+        return false;
+    } finally {
+        isHandlingCommand = false;
+    }
 }
 
 let isPolling = false;
@@ -423,6 +460,7 @@ function isTelegramActive() {
 }
 
 async function initializeTelegramClient(whatsappClient = null) {
+    if (whatsappClient) globalWhatsappClient = whatsappClient;
     const token = process.env.TELEGRAM_BOT_TOKEN;
     if (!token || token === 'your_bot_token_here') {
         console.log('ℹ️ Telegram Bot Token not found. Skipping Telegram initialization.');
@@ -452,7 +490,6 @@ async function initializeTelegramClient(whatsappClient = null) {
     isPolling = true;
     console.log('📡 Telegram Polling started... 🚀');
 
-    const telegramHistory = {}; // Store history per chat ID
 
     async function poll() {
         try {
@@ -462,6 +499,11 @@ async function initializeTelegramClient(whatsappClient = null) {
                 
                 const msg = update.message || update.edited_message || update.channel_post;
                 if (!msg) continue;
+
+                // Track last known admin name from user messages
+                if (msg.from?.first_name) {
+                    lastKnownUserName = msg.from.first_name;
+                }
 
                 // Handle Media Reception
                 let mediaInfo = null;
@@ -525,9 +567,8 @@ async function initializeTelegramClient(whatsappClient = null) {
 
                 // 2. Process with AI
                 try {
-                    // Maintain simple history
-                    if (!telegramHistory[chatId]) telegramHistory[chatId] = [];
-                    const historyText = telegramHistory[chatId].join('\n');
+                    // Inject the last 10 prior messages; current message is passed separately as prompt.
+                    const historyText = await historyHandler.getHistory('telegram', chatId);
 
                     // If media was received, construct an enriched prompt
                     let prompt = msg.text || '';
@@ -543,10 +584,7 @@ async function initializeTelegramClient(whatsappClient = null) {
                     
                     await tgClient.sendTelegramMessage(chatId, finalReply);
 
-                    // Update history
-                    telegramHistory[chatId].push(`User: ${msg.text}`);
-                    telegramHistory[chatId].push(`H-Claw: ${finalReply}`);
-                    if (telegramHistory[chatId].length > 20) telegramHistory[chatId].splice(0, 2);
+                    historyHandler.appendHistory('telegram', chatId, msg.text, finalReply);
                     
                 } catch (aiErr) {
                     console.error('Telegram AI Error:', aiErr);
@@ -573,9 +611,61 @@ async function initializeTelegramClient(whatsappClient = null) {
     poll();
 }
 
+/**
+ * Processes a message for a specific chat as if it was received from Telegram.
+ */
+async function processIncomingTelegramMessage(chatId, text) {
+    const { generateAIResponse } = require('./aiHandler');
+    const { appendBotLog } = require('./loggerTool');
+    
+    const time = new Date().toLocaleTimeString();
+    let who = getLastKnownUserName ? getLastKnownUserName() : "User";
+    if (who === "User") who = chatId;
+
+    console.log(`📩 TG IN │ Dashboard (${who}) │ ${time} │ #DASH │ ${text}`);
+
+    const cleanedText = typeof text === 'string' ? text.trim() : '';
+    const lowerText = cleanedText.toLowerCase();
+    if (
+        cleanedText &&
+        !lowerText.includes('h-claw started!') &&
+        !lowerText.includes('h-claw stopped!') &&
+        lowerText !== '/stop' &&
+        !cleanedText.startsWith('/')
+    ) {
+        appendBotLog(`👤 ${cleanedText}`);
+    }
+
+    // Also send the dashboard text to the Telegram chat conversation
+    await tgClient.sendTelegramMessage(chatId, text, false, false);
+
+    if (await builtInCommands(chatId, text)) return;
+
+    try {
+        // Inject the last 10 prior messages; current message is passed separately as prompt.
+        const historyText = await historyHandler.getHistory('telegram', chatId);
+
+        const aiReply = await generateAIResponse(text, true, globalWhatsappClient, historyText, 'telegram');
+        
+        let finalReply = aiReply;
+        if (!finalReply.startsWith('🐾')) finalReply = '🐾 ' + finalReply;
+        
+        await tgClient.sendTelegramMessage(chatId, finalReply);
+        appendBotLog(finalReply);
+
+        historyHandler.appendHistory('telegram', chatId, text, finalReply);
+    } catch (aiErr) {
+        console.error('Telegram AI Error:', aiErr);
+        await tgClient.sendTelegramMessage(chatId, '🐾 Oops, I encountered an internal error.');
+    }
+}
+
 module.exports = {
     initializeTelegramClient,
     getTelegramClient,
-    isTelegramActive
+    sendTelegramMedia: (...args) => tgClient.sendTelegramMedia(...args),
+    isTelegramActive,
+    getLastKnownUserName,
+    processIncomingTelegramMessage
 };
 

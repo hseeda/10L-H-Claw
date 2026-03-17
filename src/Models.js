@@ -185,6 +185,7 @@ function printModelVariables() {
 module.exports = {
     getActiveModel,
     getAvailableModels,
+    getAvailableImageModels,
     activeModelFallback,
     getCurrentModelInfo,
     getAvailableModelsList,

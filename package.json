@@ -16,6 +16,7 @@
     "googleapis": "^171.4.0",
     "imapflow": "^1.2.13",
     "mailparser": "^3.9.4",
+    "node-gtts": "^2.0.2",
     "nodemailer": "^8.0.2",
     "openai": "^6.27.0",
     "pdf-parse": "^2.4.5",

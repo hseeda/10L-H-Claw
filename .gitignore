@@ -3,6 +3,7 @@ node_modules/
 .wwebjs_cache/
 *.log
 tmp/
+logs/
 secrets/.env
 secrets/.env1
 secrets/mail_accounts.json
