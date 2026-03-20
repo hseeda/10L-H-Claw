@@ -47,6 +47,7 @@ graph TD
 ```
 10L-H-Claw/
 ├── hclaw.js                    # Entry point: loads .env, starts clients, handles shutdown
+├── hclaw-onboard.js            # OnBoard dashboard & bot management interface
 ├── src/
 │   ├── Models.js               # Model registry, fallback chain, image model config
 │   ├── aiHandler.js            # Gemini & OpenAI pipelines, tool-calling loop, token tracking
@@ -132,6 +133,15 @@ The bot can learn new capabilities during conversation and save them to `TOOLS.m
 - **WhatsApp** (primary): Full integration via `whatsapp-web.js` with QR auth
 - **Telegram** (secondary): Bot API polling with media support and cross-platform notifications
 
+### Management Dashboard (OnBoard)
+
+H-Claw includes a lightweight web-based management dashboard for monitoring and controlling the bot. Run `node hclaw-onboard.js` to start it.
+
+- **Status Monitoring**: Check if the bot is running live.
+- **Bot Control**: Start or stop the main bot process from the UI.
+- **Unified Logging**: View system, bot, WhatsApp, Telegram, and dashboard logs in one place.
+- **Responsive UI**: Sleek, modern interface tailored for quick checks and controls.
+
 ---
 
 ## Slash Commands
@@ -207,7 +217,15 @@ node hclaw.js
 
 ### 5. Email Setup (Optional)
 
-Configure manually in `secrets/mail_accounts.json` or tell the bot: *"Add my Gmail account with these settings..."*
+### 6. Management Dashboard (Optional)
+
+Run the onboard dashboard to manage the bot from a web interface:
+
+```bash
+node hclaw-onboard.js
+```
+
+Access the dashboard at `http://localhost:3000`.
 
 > **Warning**: Never commit `.env` or `mail_accounts.json`. They are in `.gitignore` by default.
 
@@ -238,7 +256,7 @@ Configure manually in `secrets/mail_accounts.json` or tell the bot: *"Add my Gma
 
 ## Roadmap
 
-- **Heartbeat Service**: Proactive reminders and background checks without waiting for user input
+- [x] **Management Dashboard (OnBoard)**: Bot monitoring & control interface
 - **Persona Switching**: Dynamic personality modes via expanded SOUL.md configuration
 
 ---
