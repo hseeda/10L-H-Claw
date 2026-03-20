@@ -94,13 +94,38 @@ async function analyzeLocalMediaFile(filePath, mimeType = "") {
 
   const resolvedMimeType = mimeType || detectMimeTypeFromPath(filePath);
 
-  if (resolvedMimeType.startsWith("audio/")) {
+  const { getActiveModel } = require("./Models");
+  const activeModelProvider = getActiveModel().provider;
+
+  if (resolvedMimeType.startsWith("audio/") && (activeModelProvider === "openai" || activeModelProvider === "chatgpt")) {
     if (!internalOpenAI) return "❌ OpenAI (Whisper) not configured.";
     const transcription = await internalOpenAI.audio.transcriptions.create({
       file: fs.createReadStream(filePath),
       model: "whisper-1",
     });
     return `🎙️ Local Audio Transcription: "${transcription.text}"`;
+  }
+
+  if (activeModelProvider === "openai" || activeModelProvider === "chatgpt") {
+    const prompt = "Describe this file in explicit detail. Omit talk.";
+
+    if (resolvedMimeType.startsWith("image/")) {
+        const base64Image = fs.readFileSync(filePath, { encoding: 'base64' });
+        const currentModel = getActiveModel().model;
+        const response = await internalOpenAI.chat.completions.create({
+            model: currentModel,
+            messages: [{
+                role: "user",
+                content: [
+                    { type: "text", text: prompt },
+                    { type: "image_url", image_url: { url: `data:${resolvedMimeType};base64,${base64Image}` } }
+                ]
+            }]
+         });
+         return `📄 [OPENAI IMAGE ANALYSIS]\n${response.choices[0].message.content}`;
+    }
+
+    return "❌ OpenAI does not support analyzing this file type directly.";
   }
 
   if (!fileManager || !geminiToolClient) {
@@ -112,30 +137,6 @@ async function analyzeLocalMediaFile(filePath, mimeType = "") {
     mimeType: resolvedMimeType,
   });
 
-  const { getActiveModel, getAvailableModels } = require("./Models");
-  const activeModelProvider = getActiveModel().provider;
-
-  if (activeModelProvider === "openai" || activeModelProvider === "chatgpt") {
-    const prompt = "Describe this file in explicit detail. Omit talk.";
-    const availableModels = getAvailableModels();
-    const defaultModelEntry = availableModels.find(m => m.startsWith("gemini:")) || availableModels[0];
-    if (!defaultModelEntry) return "❌ No models configured.";
-    const defaultModel = defaultModelEntry.split(":")[1] || defaultModelEntry;
-
-    const proxyResponse = await geminiToolClient.models.generateContent({
-      model: defaultModel,
-      contents: [{
-        role: "user",
-        parts: [
-          { fileData: { mimeType: resolvedMimeType, fileUri: uploadResult.uri } },
-          { text: prompt },
-        ],
-      }],
-    });
-    try { await fileManager.delete({ name: uploadResult.name }); } catch (err) {}
-    return `📄 [LOCAL MEDIA ANALYSIS]\n${proxyResponse.text}`;
-  }
-
   return `[FILE_URI_ATTACHMENT]
 MimeType: ${resolvedMimeType}
 FileUri: ${uploadResult.uri}`;
@@ -146,34 +147,35 @@ const customToolsSchema = [
   { name: "execute_powershell", description: "PowerShell cmd", parameters: P({ command: S("c") }, ["command"]) },
   { name: "memory_list", description: "List facts" },
   { name: "memory_add", description: "Add fact", parameters: P({ fact: S("f") }, ["fact"]) },
-  { name: "memory_add_media", description: "Save media fact", parameters: P({ file_path: S("p"), description: S("d") }, ["file_path", "description"]) },
+  { name: "memory_add_media", description: "Save a fact linking to a local media file (image/audio)", parameters: P({ file_path: S("Disk path to the media file to store"), description: S("Descriptive text about what the media is") }, ["file_path", "description"]) },
   { name: "memory_remove", description: "Remove fact", parameters: P({ index: I("1-based") }, ["index"]) },
   { name: "memory_edit", description: "Edit fact", parameters: P({ index: I("1-based"), new_fact: S("t") }, ["index", "new_fact"]) },
   { name: "memory_clear", description: "Clear facts" },
-  { name: "file_read", description: "Read file", parameters: P({ file_path: S("p") }, ["file_path"]) },
-  { name: "file_write", description: "Write file", parameters: P({ file_path: S("p"), content: S("d") }, ["file_path", "content"]) },
-  { name: "file_append", description: "Append file", parameters: P({ file_path: S("p"), content: S("d") }, ["file_path", "content"]) },
-  { name: "file_list", description: "List dir", parameters: P({ dir_path: S("p") }, ["dir_path"]) },
+  { name: "file_read", description: "Read text from a local file", parameters: P({ file_path: S("Path to the file on disk to read") }, ["file_path"]) },
+  { name: "file_write", description: "Create a new file or overwrite with content", parameters: P({ file_path: S("Target file path"), content: S("The full text content to write") }, ["file_path", "content"]) },
+  { name: "file_append", description: "Append text to an existing file", parameters: P({ file_path: S("Target file path"), content: S("The text content to append (newline prefixed if needed)") }, ["file_path", "content"]) },
+  { name: "file_list", description: "List contents of a directory", parameters: P({ dir_path: S("Path to the directory to survey") }, ["dir_path"]) },
   { name: "tool_save", description: "Save to TOOLS.md", parameters: P({ tool_content: S("d") }, ["tool_content"]) },
-  { name: "whatsapp_send", description: "Send WA text", parameters: P({ target_id: S("phone"), message: S("t") }, ["target_id", "message"]) },
-  { name: "whatsapp_list_recent", description: "WA history", parameters: P({ target_id: S("phone"), limit: I("n") }, ["target_id"]) },
-  { name: "whatsapp_list_contacts", description: "Search WA contacts", parameters: P({ query: S("q") }) },
-  { name: "whatsapp_reply", description: "Reply WA msg", parameters: P({ message_id: S("id"), message: S("t") }, ["message_id", "message"]) },
-  { name: "generate_image", description: "Gen/edit image; image_path for img2img", parameters: P({ prompt: S("p"), image_path: S("src") }, ["prompt"]) },
-  { name: "generate_audio", description: "Text-to-speech. Provide spoken text in text, input, prompt, or message. Voice is optional.", parameters: P({ text: S("Speech text"), input: S("Speech text alias"), prompt: S("Speech text alias"), message: S("Speech text alias"), voice: S("alloy|echo|fable|onyx|nova|shimmer") }, ["text"]) },
-  { name: "whatsapp_send_media", description: "Send WA media", parameters: P({ target_id: S("phone"), file_path: S("p"), caption: S("c") }, ["target_id", "file_path"]) },
+  { name: "whatsapp_send", description: "Send a text message via WhatsApp", parameters: P({ target_id: S("WhatsApp ID/Phone number (e.g., '1234567890@c.us')"), message: S("Message text to send") }, ["target_id", "message"]) },
+  { name: "whatsapp_list_recent", description: "Fetch recent message history for a target", parameters: P({ target_id: S("WhatsApp ID/Phone number"), limit: I("Max count of messages (default 10)") }, ["target_id"]) },
+  { name: "whatsapp_list_contacts", description: "Search WhatsApp contacts or groups by string", parameters: P({ query: S("Search term for Name, Phone, or Group Title") }) },
+  { name: "whatsapp_reply", description: "Reply to a specific message ID on WhatsApp", parameters: P({ message_id: S("The message ID to reply to"), message: S("Reply text to send") }, ["message_id", "message"]) },
+  { name: "generate_image", description: "Generate or edit an image. Provide a detailed descriptive prompt.", parameters: P({ prompt: S("Detailed text description of the image to generate"), image_path: S("Source image file path for image-to-image or editing [optional]") }, ["prompt"]) },
+  { name: "generate_audio", description: "Text-to-speech. Provide spoken text.", parameters: P({ text: S("Speech text"), input: S("Speech text alias"), prompt: S("Speech text alias"), message: S("Speech text alias"), voice: S("alloy|echo|fable|onyx|nova|shimmer") }, ["text"]) },
+  { name: "whatsapp_send_media", description: "Send an image, audio, or document via WhatsApp", parameters: P({ target_id: S("WhatsApp ID/Phone number"), file_path: S("Path to file on disk"), caption: S("Caption text for the media [optional]") }, ["target_id", "file_path"]) },
   { name: "whatsapp_read_media", description: "AI-read WA media", parameters: P({ message_id: S("id") }, ["message_id"]) },
   { name: "whatsapp_download_media", description: "Download WA media", parameters: P({ message_id: S("id"), filename: S("n") }, ["message_id"]) },
   { name: "mail_add_account", description: "Add mail acct", parameters: P({ name: S("n"), host: S("h"), port: I("p"), secure: B("ssl"), user: S("u"), pass: S("pw"), type: S("smtp|imap") }, ["name", "host", "port", "secure", "user", "pass", "type"]) },
   { name: "mail_list_accounts", description: "List mail accts" },
-  { name: "mail_send_email", description: "Send email", parameters: P({ account_name: S("a"), to: S("to"), subject: S("s"), body: S("b"), html: S("h") }, ["account_name", "to", "subject", "body"]) },
-  { name: "mail_list_folders", description: "List IMAP folders", parameters: P({ account_name: S("a") }, ["account_name"]) },
-  { name: "mail_list_messages", description: "List emails headers", parameters: P({ account_name: S("a"), folder: S("f"), limit: I("n") }, ["account_name"]) },
-  { name: "mail_list_messages_all", description: "List emails full", parameters: P({ account_name: S("a"), folder: S("f"), limit: I("n") }, ["account_name"]) },
-  { name: "mail_get_message", description: "Get email", parameters: P({ account_name: S("a"), uid: S("u"), folder: S("f"), download_attachments: B("dl") }, ["account_name", "uid"]) },
-  { name: "mail_delete_message", description: "Delete email", parameters: P({ account_name: S("a"), uid: S("u"), folder: S("f") }, ["account_name", "uid"]) },
-  { name: "mail_move_message", description: "Move email", parameters: P({ account_name: S("a"), uid: S("u"), target_folder: S("dest"), source_folder: S("src") }, ["account_name", "uid", "target_folder"]) },
+  { name: "mail_send_email", description: "Send email", parameters: P({ account_name: S("Account name (e.g., 'gmail' or 'gmail_smtp')"), to: S("Recipient email"), subject: S("Subject"), body: S("Plain text body"), html: S("HTML body [optional]") }, ["account_name", "to", "subject", "body"]) },
+  { name: "mail_list_folders", description: "List IMAP folders", parameters: P({ account_name: S("Account name (e.g., 'gmail' or 'gmail_imap')") }, ["account_name"]) },
+  { name: "mail_list_messages", description: "List email headers", parameters: P({ account_name: S("Account name (e.g., 'gmail' or 'gmail_imap')"), folder: S("Folder (default: INBOX)"), limit: I("Max count") }, ["account_name"]) },
+  { name: "mail_list_messages_all", description: "List full emails", parameters: P({ account_name: S("Account name (e.g., 'gmail' or 'gmail_imap')"), folder: S("Folder (default: INBOX)"), limit: I("Max count") }, ["account_name"]) },
+  { name: "mail_get_message", description: "Get email details", parameters: P({ account_name: S("Account name"), uid: S("Message UID"), folder: S("Folder (default: INBOX)"), download_attachments: B("Download attachments") }, ["account_name", "uid"]) },
+  { name: "mail_delete_message", description: "Delete email", parameters: P({ account_name: S("Account name"), uid: S("Message UID"), folder: S("Folder") }, ["account_name", "uid"]) },
+  { name: "mail_move_message", description: "Move email", parameters: P({ account_name: S("Account name"), uid: S("Message UID"), target_folder: S("Destination folder"), source_folder: S("Source folder") }, ["account_name", "uid", "target_folder"]) },
   { name: "telegram_send", description: "Send TG msg", parameters: P({ chat_id: S("c"), message: S("t") }, ["chat_id", "message"]) },
+  { name: "telegram_reply", description: "Reply TG msg", parameters: P({ chat_id: S("c"), message_id: I("m"), message: S("t") }, ["chat_id", "message_id", "message"]) },
   { name: "telegram_list_recent", description: "TG updates", parameters: P({ offset: I("o"), limit: I("n") }) },
   { name: "telegram_delete", description: "Delete TG msg", parameters: P({ chat_id: S("c"), message_id: I("m") }, ["chat_id", "message_id"]) },
   { name: "telegram_send_media", description: "Send TG media", parameters: P({ chat_id: S("c"), file_path: S("p"), caption: S("cap") }, ["chat_id", "file_path"]) },
@@ -234,7 +236,7 @@ function runShellCommand(shell, command) {
       ? `pwsh -NoProfile -NonInteractive -Command "${command.replace(/"/g, '\\"')}"`
       : command;
 
-  const options = { timeout: TOOL_TIMEOUT_MS };
+  const options = { timeout: TOOL_TIMEOUT_MS, windowsHide: true };
   if (shell === "bash") {
     options.shell = "bash";
   }
@@ -701,7 +703,10 @@ async function executeTool(name, args, client = null, platform = 'whatsapp') {
       if (!media) return `❌ Failed to download media from WhatsApp.`;
 
       // 1. Audio / Voice Notes -> OpenAI Whisper
-      if (media.mimetype.includes("audio")) {
+      const { getActiveModel } = require("./Models");
+      const activeModelProvider = getActiveModel().provider;
+
+      if (media.mimetype.includes("audio") && (activeModelProvider === "openai" || activeModelProvider === "chatgpt")) {
         if (!internalOpenAI) return "❌ OpenAI (Whisper) not configured.";
         const fp = path.join(tmpDir, `temp_read_${Date.now()}.ogg`);
         fs.writeFileSync(fp, Buffer.from(media.data, "base64"));
@@ -734,8 +739,7 @@ async function executeTool(name, args, client = null, platform = 'whatsapp') {
         // Clean up temporary file
         fs.unlinkSync(fp);
 
-        const { getActiveModel, getAvailableModels } = require("./Models");
-        const activeModelProvider = getActiveModel().provider;
+        const { getAvailableModels } = require("./Models");
 
         // If the main model is OpenAI, OpenAI cannot read Google's File_URIs.
         // So we use Gemini internally to read the file and return the summary text back to OpenAI.
@@ -743,40 +747,24 @@ async function executeTool(name, args, client = null, platform = 'whatsapp') {
           activeModelProvider === "openai" ||
           activeModelProvider === "chatgpt"
         ) {
-          if (!geminiToolClient)
-            return "❌ Gemini fallback not configured. Cannot proxy document reading.";
-
           const prompt = "Describe this file in explicit detail. Omit talk.";
 
-          const availableModels = getAvailableModels();
-          const defaultModelEntry = availableModels.find(m => m.startsWith("gemini:")) || availableModels[0];
-          if (!defaultModelEntry) return "❌ No models configured.";
-          const defaultModel = defaultModelEntry.split(":")[1] || defaultModelEntry;
+          if (media.mimetype.startsWith("image/")) {
+              const currentModel = getActiveModel().model;
+              const response = await internalOpenAI.chat.completions.create({
+                  model: currentModel,
+                  messages: [{
+                      role: "user",
+                      content: [
+                          { type: "text", text: prompt },
+                          { type: "image_url", image_url: { url: `data:${media.mimetype};base64,${media.data}` } }
+                      ]
+                  }]
+               });
+               return `📄 [OPENAI IMAGE ANALYSIS]\n${response.choices[0].message.content}`;
+          }
 
-          const proxyResponse = await geminiToolClient.models.generateContent({
-            model: defaultModel,
-            contents: [
-              {
-                role: "user",
-                parts: [
-                  {
-                    fileData: {
-                      mimeType: media.mimetype,
-                      fileUri: uploadResult.uri,
-                    },
-                  },
-                  { text: prompt },
-                ],
-              },
-            ],
-          });
-
-          // We can optionally delete the file from Google now since we got the text
-          try {
-            await fileManager.delete({ name: uploadResult.name });
-          } catch (err) {}
-
-          return `📄 [PROXY AI DOCUMENT ANALYSIS]\n${proxyResponse.text}`;
+          return "❌ OpenAI does not support analyzing this file type directly.";
         }
 
         // If main model is Gemini, just return the URI so Gemini can read it directly
@@ -928,6 +916,15 @@ FileUri: ${uploadResult.uri}`;
         }
     }
 
+    if (name === "telegram_reply") {
+        try {
+          const data = await telegram.sendTelegramMessage(args.chat_id, args.message, true, true, args.message_id);
+          return `✅ Telegram replied. ID: ${data.result.message_id}`;
+        } catch (e) {
+          return `❌ Telegram Error: ${e.message}`;
+        }
+    }
+
     if (name === "telegram_list_recent") {
         try {
           const data = await telegram.getTelegramUpdates(args.offset, args.limit);
@@ -1002,7 +999,10 @@ FileUri: ${uploadResult.uri}`;
             await telegram.downloadTelegramFile(fileId, fp);
 
             // Re-use the existing logic from whatsapp_read_media but adapted for a local file
-            if (type === 'voice' || type === 'audio') {
+            const { getActiveModel } = require("./Models");
+            const activeModelProvider = getActiveModel().provider;
+
+            if ((type === 'voice' || type === 'audio') && (activeModelProvider === "openai" || activeModelProvider === "chatgpt")) {
                 if (!internalOpenAI) return "❌ OpenAI (Whisper) not configured.";
                 const transcription = await internalOpenAI.audio.transcriptions.create({
                     file: fs.createReadStream(fp),
@@ -1010,6 +1010,28 @@ FileUri: ${uploadResult.uri}`;
                 });
                 fs.unlinkSync(fp);
                 return `🎙️ Telegram Audio Transcription: "${transcription.text}"`;
+            }
+
+            if (mimetype.startsWith("image/") && (activeModelProvider === "openai" || activeModelProvider === "chatgpt")) {
+                const base64Image = fs.readFileSync(fp, { encoding: 'base64' });
+                fs.unlinkSync(fp); // cleanup early
+                const currentModel = getActiveModel().model;
+                const response = await internalOpenAI.chat.completions.create({
+                    model: currentModel,
+                    messages: [{
+                        role: "user",
+                        content: [
+                            { type: "text", text: "Describe this file in explicit detail. Omit talk." },
+                            { type: "image_url", image_url: { url: `data:${mimetype};base64,${base64Image}` } }
+                        ]
+                    }]
+                 });
+                 return `📄 [OPENAI IMAGE ANALYSIS]\n${response.choices[0].message.content}`;
+            }
+
+            if (activeModelProvider === "openai" || activeModelProvider === "chatgpt") {
+                fs.unlinkSync(fp); // cleanup early
+                return "❌ OpenAI does not support analyzing this file type directly.";
             }
 
             // For images/docs, use Gemini
@@ -1021,25 +1043,7 @@ FileUri: ${uploadResult.uri}`;
             });
             fs.unlinkSync(fp);
 
-            const { getActiveModel, getAvailableModels } = require("./Models");
-            const activeModelProvider = getActiveModel().provider;
-
-            if (activeModelProvider === "openai" || activeModelProvider === "chatgpt") {
-                const prompt = "Describe this file in explicit detail. Omit talk.";
-                const availableModels = getAvailableModels();
-                const defaultModelEntry = availableModels.find(m => m.startsWith("gemini:")) || availableModels[0];
-                if (!defaultModelEntry) return "❌ No models configured.";
-                const defaultModel = defaultModelEntry.split(":")[1] || defaultModelEntry;
-
-                const proxyResponse = await geminiToolClient.models.generateContent({
-                    model: defaultModel,
-                    contents: [{ role: "user", parts: [{ fileData: { mimeType: mimetype, fileUri: uploadResult.uri } }, { text: prompt }] }],
-                });
-                try { await fileManager.delete({ name: uploadResult.name }); } catch (err) {}
-                return `📄 [TELEGRAM MEDIA ANALYSIS]\n${proxyResponse.text}`;
-            }
-
-            return `📄 [TELEGRAM_FILE_URI] MimeType: ${mimetype} FileUri: ${uploadResult.uri}`;
+            return `📄 [FILE_URI_ATTACHMENT] MimeType: ${mimetype} FileUri: ${uploadResult.uri}`;
         } catch (e) {
             return `❌ Telegram Read Media Error: ${e.message}`;
         }

@@ -92,7 +92,7 @@ const tgClient = {
      * Sends a message to a Telegram chat using the Bot API.
      * Includes a fallback to plaintext if Markdown parsing fails.
      */
-    async sendTelegramMessage(chatId, text, useMarkdown = true, logMessage = true) {
+    async sendTelegramMessage(chatId, text, useMarkdown = true, logMessage = true, replyToMessageId = null) {
         const token = process.env.TELEGRAM_BOT_TOKEN;
         if (!token) throw new Error('TELEGRAM_BOT_TOKEN is missing in .env');
 
@@ -101,6 +101,7 @@ const tgClient = {
             chat_id: chatId,
             text: useMarkdown ? formatForTelegram(text) : text
         };
+        if (replyToMessageId) body.reply_to_message_id = replyToMessageId;
         
         // We use Markdown (V1) because it's simpler for basic formatting.
         if (useMarkdown) body.parse_mode = 'Markdown';

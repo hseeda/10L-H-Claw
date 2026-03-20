@@ -48,7 +48,10 @@ class MailManager {
   }
 
   async sendEmail(accountName, to, subject, text, html = null) {
-    const config = this.accounts[accountName];
+    let config = this.accounts[accountName];
+    if (!config && this.accounts[`${accountName}_smtp`]) {
+      config = this.accounts[`${accountName}_smtp`];
+    }
     if (!config || config.type !== 'smtp') throw new Error("Invalid SMTP account");
 
     const transporter = nodemailer.createTransport({
@@ -73,7 +76,10 @@ class MailManager {
   }
 
   async withImap(accountName, callback) {
-    const config = this.accounts[accountName];
+    let config = this.accounts[accountName];
+    if (!config && this.accounts[`${accountName}_imap`]) {
+      config = this.accounts[`${accountName}_imap`];
+    }
     if (!config || config.type !== 'imap') throw new Error("Invalid IMAP account");
 
     const client = new ImapFlow({

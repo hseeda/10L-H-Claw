@@ -50,7 +50,7 @@ console.error = (...args) => {
 
 function appendBotLog(text) {
     if (typeof text === 'string' && text.startsWith('👤')) {
-        botLogStream.write('--------------------------------------------------\n');
+        botLogStream.write('──────────────────────────────────────────────────\n');
     }
     botLogStream.write(`${text}\n`);
 }

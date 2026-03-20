@@ -21,23 +21,27 @@ if (!fs.existsSync(envPath)) {
     console.error('║    - GEMINI_API_KEY                                  ║');
     console.error('║                                                      ║');
     console.error('║  Optional:                                           ║');
+
     console.error('║    - TELEGRAM_BOT_TOKEN                              ║');
     console.error('║                                                      ║');
     console.error('╚══════════════════════════════════════════════════════╝\n');
     process.exit(1);
 }
 
+const oldLog = console.log;
+console.log = () => {}; // Suppress dotenv tip/verbose output
 require('dotenv').config({ path: envPath, quiet: true });
 
 const envBotPath = path.join(__dirname, 'secrets', '.env_bot');
 if (fs.existsSync(envBotPath)) {
     require('dotenv').config({ path: envBotPath, override: true });
 }
+console.log = oldLog;
 const { initializeWhatsAppClient } = require('./src/whatsappClient');
 const { initializeTelegramClient } = require('./src/telegramClient');
 const queueFile = path.join(__dirname, 'tmp', 'onboard_ui_queue.jsonl');
+const pidFile = path.join(__dirname, 'public', 'hclaw.pid');
 let queueReadOffset = 0;
-
 console.log(`🐾 WhatsApp AI Assistant initializing 🐾`);
 
 // --- Startup warnings for missing API keys ---
@@ -84,6 +88,43 @@ try {
 } catch (error) {
     queueReadOffset = 0;
 }
+
+function writePidFile() {
+    try {
+        fs.mkdirSync(path.dirname(pidFile), { recursive: true });
+        fs.writeFileSync(pidFile, String(process.pid), 'utf8');
+    } catch (error) {
+    }
+}
+
+function clearPidFile() {
+    try {
+        if (fs.existsSync(pidFile)) fs.unlinkSync(pidFile);
+    } catch (error) {
+    }
+}
+
+function validatePidFileOnStartup() {
+    try {
+        if (!fs.existsSync(pidFile)) return;
+        const raw = fs.readFileSync(pidFile, 'utf8').trim();
+        const pid = parseInt(raw, 10);
+        if (!Number.isInteger(pid) || pid <= 0) {
+            clearPidFile();
+            return;
+        }
+        try {
+            process.kill(pid, 0);
+        } catch (error) {
+            clearPidFile();
+        }
+    } catch (error) {
+        clearPidFile();
+    }
+}
+
+validatePidFileOnStartup();
+writePidFile();
 
 async function handleSettingsUpdate(settings) {
     const s = settings || {};
@@ -240,8 +281,19 @@ setInterval(() => {
 
 // Handle graceful shutdown globally
 process.on('SIGINT', async () => {
+    clearPidFile();
     const { stopServer } = require('./src/serverTools');
     await stopServer();
+});
+
+process.on('SIGTERM', async () => {
+    clearPidFile();
+    const { stopServer } = require('./src/serverTools');
+    await stopServer();
+});
+
+process.on('exit', () => {
+    clearPidFile();
 });
 
 // Handle IPC messages from Admin Server

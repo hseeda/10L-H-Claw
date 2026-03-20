@@ -17,9 +17,9 @@ const toolsPath  = path.join(__dirname, '..', 'MD', 'TOOLS.md');
 const soulPath   = path.join(__dirname, '..', 'MD', 'SOUL.md');
 
 const PLATFORM_PROMPTS = {
-    whatsapp: "You are H-Claw, a concise AI assistant. Platform: WhatsApp. Do NOT use whatsapp_send/whatsapp_reply to reply to the current dialogue; return text directly instead. Use tools only for other chats.",
-    telegram: "You are H-Claw, a concise AI assistant. Platform: Telegram. Do NOT use telegram_send to reply to the current dialogue; return text directly instead. Use tools only for other chats.",
-    onboard: "You are H-Claw, a concise AI assistant. Platform: OB Dashboard. You can use tools relevant to system admin."
+    whatsapp: "Platform: WhatsApp. Reply with text directly; use whatsapp_send/whatsapp_reply for other chats only.",
+    telegram: "Platform: Telegram. Reply with text directly; use telegram_send/telegram_reply for other chats only.",
+    onboard: "Platform: OB Dashboard. System admin tools enabled."
 };
 
 function getSystemPrompt(platform = 'whatsapp') {

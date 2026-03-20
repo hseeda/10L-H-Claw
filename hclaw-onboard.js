@@ -2,8 +2,11 @@ const http = require('http');
 const fs = require('fs');
 const { fork, exec, execFile } = require('child_process');
 const path = require('path');
+const oldLog = console.log;
+console.log = () => {}; // Suppress dotenv tip/verbose output
 require('dotenv').config({ path: path.join('secrets', '.env'), quiet: true });
 require('dotenv').config({ path: path.join('secrets', '.env_bot'), override: true, quiet: true });
+console.log = oldLog;
 
 const PORT = Number(process.env.PORT) || 3000;
 const logFile = path.join('logs', 'log.txt');
@@ -15,6 +18,7 @@ const queueFile = path.join('tmp', 'onboard_ui_queue.jsonl');
 const tempDir = 'tmp';
 const botScriptPath = path.resolve(__dirname, 'hclaw.js');
 const isWindows = process.platform === 'win32';
+const LOG_FILEPATH_REGEX = String.raw`(?:[a-zA-Z]:\\[^\n\)\`\'\"]*?\.[a-zA-Z0-9]{1,10})|(?:(?<=^)|(?<=[^a-zA-Z0-9]))(/[^ \n\)\`\'\"]*?\.[a-zA-Z0-9]{1,10})\b|(?:\b|(?<=\s))([\w.-]+(?:[ ][\w.-]+)*(?:[\/\\][\w.-]+(?:[ ][\w.-]+)*)*\.[a-zA-Z0-9]{1,10})\b`;
 let botProcess = null;
 let botPid = null;
 let startInFlight = false;
@@ -361,6 +365,38 @@ async function buildFilteredLog(source) {
     return filteredContent;
 }
 
+function resolveWorkspaceFilePath(fileParam) {
+    const rawPath = String(fileParam || '').trim();
+    if (!rawPath) return null;
+
+    const candidatePaths = [];
+    if (path.isAbsolute(rawPath)) {
+        candidatePaths.push(path.normalize(rawPath));
+    } else {
+        candidatePaths.push(path.normalize(path.join(__dirname, rawPath)));
+
+        const basename = path.basename(rawPath);
+        if (basename === rawPath) {
+            ['secrets', 'logs', 'tmp', 'MD', 'src', 'assets', 'utils'].forEach((dir) => {
+                candidatePaths.push(path.normalize(path.join(__dirname, dir, rawPath)));
+            });
+        }
+    }
+
+    const normDirname = path.normalize(__dirname + path.sep);
+    for (const candidate of candidatePaths) {
+        const normalizedCandidate = path.normalize(candidate);
+        if (!normalizedCandidate.startsWith(normDirname) && normalizedCandidate !== path.normalize(__dirname)) {
+            continue;
+        }
+        if (fs.existsSync(normalizedCandidate)) {
+            return normalizedCandidate;
+        }
+    }
+
+    return candidatePaths[0] || null;
+}
+
 const html = `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -397,6 +433,7 @@ const html = `<!DOCTYPE html>
         html,
         body {
             min-height: 100%;
+            overflow: hidden;
         }
 
         body {
@@ -415,9 +452,21 @@ const html = `<!DOCTYPE html>
             font: inherit;
         }
 
+        .filepath-link {
+            text-decoration: underline;
+            color: #2563eb;
+            cursor: pointer;
+            transition: opacity 0.2s ease;
+        }
+        .filepath-link:hover {
+            opacity: 0.8;
+        }
+
         .app-shell {
+            min-height: 100vh;
             height: 100vh;
             display: flex;
+            overflow: hidden;
         }
 
         .sidebar {
@@ -428,7 +477,10 @@ const html = `<!DOCTYPE html>
             display: flex;
             flex-direction: column;
             gap: 10px;
+            min-height: 0;
+            overflow-x: hidden;
             overflow-y: auto;
+            scrollbar-gutter: stable;
         }
 
         .brand {
@@ -514,7 +566,7 @@ const html = `<!DOCTYPE html>
             flex-direction: column;
             gap: 6px;
             overflow: hidden;
-            max-height: 320px;
+            max-height: 500px;
             transition: max-height 180ms ease, opacity 180ms ease, margin-top 180ms ease;
         }
 
@@ -742,16 +794,53 @@ const html = `<!DOCTYPE html>
             display: flex;
         }
 
-        .chat-board {
+        .log-container {
             flex: 1;
+            display: flex;
             min-height: 0;
             background: rgba(255, 255, 255, 0.92);
             border: 1px solid var(--line);
             border-radius: 16px;
-            overflow-y: auto;
             box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9);
-            width: 100%;
-            padding: 16px 18px;
+            overflow: hidden;
+            padding-right: 6px;
+        }
+
+        .gutter {
+            padding: 16px 8px;
+            background: #f1f5f9;
+            color: #64748b;
+            text-align: right;
+            font-family: "Cascadia Code", "Consolas", monospace;
+            font-size: 15px;
+            line-height: 1.45;
+            user-select: none;
+            border-right: 1px solid var(--line);
+            overflow-y: hidden;
+            min-width: 42px;
+        }
+
+        .gutter-line {
+            box-sizing: border-box;
+            min-height: 1.45em;
+        }
+
+        .log-line {
+            min-height: 1.45em;
+        }
+
+        .chat-board {
+            flex: 1 1 auto;
+            min-width: 0;
+            min-height: 0;
+            background: transparent;
+            border: none;
+            border-radius: 0;
+            overflow-y: scroll;
+            width: auto;
+            margin-right: 4px;
+            padding: 16px 20px 16px 18px;
+            box-sizing: border-box;
             color: #1c2733;
             font-family: "Cascadia Code", "Consolas", monospace;
             font-size: 15px;
@@ -759,7 +848,15 @@ const html = `<!DOCTYPE html>
             resize: none;
             cursor: text;
             user-select: text;
+            white-space: pre;
+            overflow-x: auto;
+            scrollbar-gutter: stable;
+        }
+
+        div.chat-board {
             white-space: pre-wrap;
+            overflow-wrap: anywhere;
+            overflow-x: hidden;
         }
 
         .chat-board:focus {
@@ -778,13 +875,16 @@ const html = `<!DOCTYPE html>
         }
 
         .settings-pane {
-            flex: 1;
+            flex: 1 1 auto;
+            min-width: 0;
             min-height: 0;
             display: none;
             flex-direction: column;
             gap: 16px;
-            padding: 20px 24px 16px;
+            padding: 20px 28px 16px 24px;
             overflow-y: auto;
+            box-sizing: border-box;
+            scrollbar-gutter: stable;
         }
 
         .settings-pane.visible {
@@ -843,22 +943,48 @@ const html = `<!DOCTYPE html>
         }
 
         .chat-board::-webkit-scrollbar {
-            width: 14px;
+            width: 16px;
+            height: 16px;
         }
 
         .chat-board::-webkit-scrollbar-track {
-            background: transparent;
+            background: #eef2f6;
+            border-left: 1px solid #dde4ea;
         }
 
         .chat-board::-webkit-scrollbar-thumb {
-            border: 4px solid transparent;
+            border: 3px solid #eef2f6;
             border-radius: 999px;
-            background: #9a9a98;
+            background: #8b96a5;
             background-clip: padding-box;
+            min-height: 36px;
         }
 
         .chat-board {
-            scrollbar-color: #9a9a98 transparent;
+            scrollbar-color: #8b96a5 #eef2f6;
+            scrollbar-width: auto;
+        }
+
+        .settings-pane::-webkit-scrollbar {
+            width: 16px;
+        }
+
+        .settings-pane::-webkit-scrollbar-track {
+            background: #eef2f6;
+            border-left: 1px solid #dde4ea;
+        }
+
+        .settings-pane::-webkit-scrollbar-thumb {
+            border: 3px solid #eef2f6;
+            border-radius: 999px;
+            background: #8b96a5;
+            background-clip: padding-box;
+            min-height: 36px;
+        }
+
+        .settings-pane {
+            scrollbar-color: #8b96a5 #eef2f6;
+            scrollbar-width: auto;
         }
 
         .composer-wrap {
@@ -1002,12 +1128,22 @@ const html = `<!DOCTYPE html>
         @media (max-width: 900px) {
             .app-shell {
                 flex-direction: column;
+                height: auto;
+                min-height: 100vh;
+                overflow: auto;
             }
 
             .sidebar {
                 width: 100%;
+                max-height: 42vh;
+                flex: 0 0 auto;
                 border-right: 0;
                 border-bottom: 1px solid var(--line);
+            }
+
+            .main-shell {
+                min-height: 0;
+                flex: 1 1 auto;
             }
 
             .topbar,
@@ -1066,6 +1202,16 @@ const html = `<!DOCTYPE html>
                 border-radius: 16px;
                 height: 50px;
             }
+
+            .filepath-link {
+                color: #2ea57f;
+                text-decoration: underline;
+                cursor: pointer;
+                font-weight: 500;
+            }
+            .filepath-link:hover {
+                color: #248566;
+            }
         }
     </style>
 </head>
@@ -1102,9 +1248,21 @@ const html = `<!DOCTYPE html>
                 </div>
             </section>
 
-            <section class="sidebar-section collapsed" aria-label="Clients">
+
+
+            <section class="sidebar-section collapsed" aria-label="Documents">
                 <button class="section-heading" type="button" data-section-toggle aria-expanded="false">
-                    <span>Clients</span>
+                    <span>Documents</span>
+                    <i class="fa-solid fa-chevron-down" aria-hidden="true"></i>
+                </button>
+                <div class="section-items" id="md-file-list">
+                    <!-- filled dynamically -->
+                </div>
+            </section>
+
+            <section class="sidebar-section" aria-label="Views">
+                <button class="section-heading" type="button" data-section-toggle aria-expanded="true">
+                    <span>Views</span>
                     <i class="fa-solid fa-chevron-down" aria-hidden="true"></i>
                 </button>
                 <div class="section-items">
@@ -1120,25 +1278,6 @@ const html = `<!DOCTYPE html>
                         <i class="fa-solid fa-display" aria-hidden="true"></i>
                         <span>OnBoard</span>
                     </button>
-                </div>
-            </section>
-
-            <section class="sidebar-section collapsed" aria-label="Documents">
-                <button class="section-heading" type="button" data-section-toggle aria-expanded="false">
-                    <span>Documents</span>
-                    <i class="fa-solid fa-chevron-down" aria-hidden="true"></i>
-                </button>
-                <div class="section-items" id="md-file-list">
-                    <!-- filled dynamically -->
-                </div>
-            </section>
-
-            <section class="sidebar-section collapsed" aria-label="Views">
-                <button class="section-heading" type="button" data-section-toggle aria-expanded="false">
-                    <span>Views</span>
-                    <i class="fa-solid fa-chevron-down" aria-hidden="true"></i>
-                </button>
-                <div class="section-items">
                     <button class="nav-item active" id="nav-system-chat" type="button" aria-current="page" data-sidebar-item>
                         <i class="fa-regular fa-rectangle-list" aria-hidden="true"></i>
                         <span>System Chat</span>
@@ -1201,13 +1340,22 @@ const html = `<!DOCTYPE html>
 
                 <div class="chat-stage">
                     <div class="log-pane visible" id="system-log-pane">
-                        <textarea class="chat-board" id="system-chat-log" readonly spellcheck="false" placeholder="Waiting for logs/log.txt..."></textarea>
+                        <div class="log-container">
+                            <div class="gutter" id="system-gutter"></div>
+                            <div class="chat-board" id="system-chat-log" onscroll="syncGutter('system')"></div>
+                        </div>
                     </div>
                     <div class="log-pane" id="bot-log-pane" aria-hidden="true">
-                        <textarea class="chat-board" id="bot-log-viewer" readonly spellcheck="false" placeholder="Waiting for logs/bot_log.txt..."></textarea>
+                        <div class="log-container">
+                            <div class="gutter" id="bot-gutter"></div>
+                            <div class="chat-board" id="bot-log-viewer" onscroll="syncGutter('bot')"></div>
+                        </div>
                     </div>
                     <div class="log-pane" id="editor-pane" aria-hidden="true">
-                        <textarea class="chat-board" id="editor-textarea" spellcheck="false" placeholder="Loading file..."></textarea>
+                        <div class="log-container">
+                            <div class="gutter" id="editor-gutter"></div>
+                            <textarea class="chat-board" id="editor-textarea" spellcheck="false" placeholder="Loading file..." onscroll="syncGutter('editor')"></textarea>
+                        </div>
                     </div>
                 </div>
 
@@ -1271,6 +1419,7 @@ const html = `<!DOCTYPE html>
             </section>
         </main>
     </div>
+    <div id="filepath-tooltip" style="display: none; position: absolute; background: #1e1e24; border: 1px solid #333; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.3); padding: 10px; z-index: 1000; max-width: 400px; max-height: 300px; overflow: auto; pointer-events: auto;" onmouseenter="clearTimeout(window.hideTooltipTimeout)" onmouseleave="window.hideFileTooltip && window.hideFileTooltip()"></div>
     <script>
         const sidebarItems = document.querySelectorAll('[data-sidebar-item]');
         const startBtn = document.getElementById('start-btn');
@@ -1325,6 +1474,138 @@ const html = `<!DOCTYPE html>
         let composerHistoryIndex = -1;
         let composerDraft = '';
         let composerImagePayload = null;
+
+        function escapeHtml(text) {
+            if (!text) return '';
+            const map = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' };
+            return text.replace(/[&<>"']/g, m => map[m]);
+        }
+
+        function isLikelyWorkspaceFilePath(value) {
+            const candidate = String(value || '').trim();
+            if (!candidate) return false;
+            if (candidate === '.' || candidate === '..') return false;
+
+            const normalized = candidate.split('\\\\').join('/');
+            const hasDirectory = normalized.includes('/');
+            const basename = normalized.split('/').pop() || normalized;
+            const extensionMatch = basename.match(/[.]([a-zA-Z0-9]{1,10})$/);
+            const extension = extensionMatch ? extensionMatch[1].toLowerCase() : '';
+            const allowedExtensions = new Set([
+                'env', 'example', 'json', 'jsonl', 'js', 'cjs', 'mjs', 'ts', 'tsx', 'jsx',
+                'md', 'txt', 'log', 'css', 'html', 'png', 'jpg', 'jpeg', 'webp', 'gif', 'svg',
+                'mp3', 'wav', 'ogg', 'm4a', 'yml', 'yaml', 'csv', 'pdf', 'lock'
+            ]);
+
+            if (hasDirectory) return Boolean(extension);
+            if (basename.startsWith('.env')) return true;
+            return allowedExtensions.has(extension);
+        }
+
+        function formatTextAsHtml(text) {
+            if (!text) return '';
+            const regex = new RegExp('${LOG_FILEPATH_REGEX.replace(/\\/g, "\\\\").replace(/\'/g, () => "\\\'")}', 'g');
+            return text.split('\\n').map(function(line) {
+                const escaped = escapeHtml(line.replace(/\\r/g, ''));
+                const processed = escaped.replace(regex, (match) => {
+                    const norm = match.split('\\\\').join('/');
+                    if (!isLikelyWorkspaceFilePath(norm)) return match;
+                    return \`<span class="filepath-link" onclick="openFileInEditor('\${norm}')" onmouseenter="showFileTooltip(event, '\${norm}')" onmouseleave="hideFileTooltip()">\${match}</span>\`;
+                });
+                return '<div class="log-line">' + processed + '</div>';
+            }).join('');
+        }
+
+        let tooltipTimeout = null;
+        window.hideTooltipTimeout = null;
+
+        function showFileTooltip(event, filePath) {
+            if (!isLikelyWorkspaceFilePath(filePath)) return;
+            if (window.hideTooltipTimeout) clearTimeout(window.hideTooltipTimeout);
+            const tooltip = document.getElementById('filepath-tooltip');
+            if (!tooltip) return;
+            
+            tooltip.innerHTML = '<div style="color: #888; font-style: italic; font-size: 12px;">Loading preview...</div>';
+            tooltip.style.display = 'block';
+            
+            const rect = event.target.getBoundingClientRect();
+            tooltip.style.left = (rect.left + window.scrollX) + 'px';
+            tooltip.style.top = (rect.bottom + window.scrollY + 5) + 'px';
+            
+            clearTimeout(tooltipTimeout);
+            tooltipTimeout = setTimeout(async () => {
+                try {
+                    const res = await fetch('/api/get-any-file?path=' + encodeURIComponent(filePath));
+                    const data = await res.json();
+                    if (!data.success) {
+                        tooltip.innerHTML = \`<div style="color: #ff4d4f; font-size: 12px;">Error: \${data.error}</div>\`;
+                        return;
+                    }
+                    if (data.isDirectory) {
+                        tooltip.innerHTML = \`<div style="font-size: 11px; color: #e4e4e7;"><strong style="display: block; margin-bottom: 6px;">Directory</strong><pre style="margin: 0; white-space: pre-wrap; color: #e4e4e7; font-family: Consolas, monospace;">\${escapeHtml(data.content)}</pre></div>\`;
+                    } else if (data.isImage) {
+                        tooltip.innerHTML = \`<img src="\${data.content}" style="max-width: 100%; max-height: 250px; border-radius: 4px; object-fit: contain;" />\`;
+                    } else if (data.isAudio) {
+                        tooltip.innerHTML = \`<audio src="\${data.content}" controls style="width: 100%; min-width: 280px; margin-top: 5px;"></audio>\`;
+                    } else {
+                        tooltip.innerHTML = \`<pre style="margin: 0; font-size: 11px; white-space: pre-wrap; color: #e4e4e7; font-family: Consolas, monospace;">\${escapeHtml(data.content.substring(0, 500))}\${data.content.length > 500 ? '...' : ''}</pre>\`;
+                    }
+                } catch (e) {
+                    tooltip.innerHTML = \`<div style="color: #ff4d4f; font-size: 12px;">Failed to load</div>\`;
+                }
+            }, 300);
+        }
+        
+        window.hideFileTooltip = function() {
+            clearTimeout(tooltipTimeout);
+            if (window.hideTooltipTimeout) clearTimeout(window.hideTooltipTimeout);
+            window.hideTooltipTimeout = setTimeout(() => {
+                const tooltip = document.getElementById('filepath-tooltip');
+                if (tooltip) tooltip.style.display = 'none';
+            }, 300);
+        }
+
+        async function openFileInEditor(filePath) {
+            if (!isLikelyWorkspaceFilePath(filePath)) return;
+            if (!filePath) return alert('No path provided');
+            const res = await fetch('/api/get-any-file?path=' + encodeURIComponent(filePath));
+            if (!res.ok) return alert('Failed to read file from workspace nodes.');
+            const data = await res.json();
+            if (!data.success) return alert(data.error || 'Access Denied');
+            if (data.isDirectory) return alert('This path is a directory, not a file.');
+            
+            let imgEl = document.getElementById('editor-image-preview');
+            const saveBtn = document.getElementById('save-md-btn'); // For reference if it exists
+            
+            const editorGutter = document.getElementById('editor-gutter');
+            if (data.isImage) {
+                editorTextarea.style.display = 'none';
+                if (editorGutter) editorGutter.style.display = 'none';
+                if (saveBtn) saveBtn.style.display = 'none'; // Hide save button for images
+                if (!imgEl) {
+                    imgEl = document.createElement('img');
+                    imgEl.id = 'editor-image-preview';
+                    imgEl.style.maxWidth = '100%';
+                    imgEl.style.maxHeight = '80vh';
+                    imgEl.style.objectFit = 'contain';
+                    imgEl.style.display = 'block';
+                    imgEl.style.margin = '0 auto';
+                    editorTextarea.parentNode.insertBefore(imgEl, editorTextarea);
+                }
+                imgEl.src = data.content;
+                imgEl.style.display = 'block';
+            } else {
+                if (imgEl) imgEl.style.display = 'none';
+                editorTextarea.style.display = 'block';
+                if (editorGutter) editorGutter.style.display = '';
+                if (saveBtn) saveBtn.style.display = 'inline-block'; // Restore save button for text
+                editorTextarea.value = data.content;
+                updateGutter('editor', data.content);
+                syncGutter('editor');
+            }
+            activeMdFile = data.path;
+            setActiveView('editor');
+        }
 
         function loadComposerHistory() {
             try {
@@ -1558,6 +1839,40 @@ const html = `<!DOCTYPE html>
             saveMdBtn.style.display = 'none';
         }
 
+        function updateGutter(paneId, text) {
+            const gutter = document.getElementById(paneId + '-gutter');
+            if (!gutter) return;
+            const lineCount = text ? text.split('\\n').length : 0;
+            let linesHtml = '';
+            for (let i = 1; i <= lineCount; i++) {
+                linesHtml += \`<div class="gutter-line">\${i}</div>\`;
+            }
+            gutter.innerHTML = linesHtml;
+        }
+
+        function syncGutterHeights(paneId) {
+            const logId = paneId === 'system' ? 'system-chat-log' : 'bot-log-viewer';
+            const logEl = document.getElementById(logId);
+            const gutter = document.getElementById(paneId + '-gutter');
+            if (!logEl || !gutter) return;
+            const logLines = logEl.querySelectorAll('.log-line');
+            const gutterLines = gutter.querySelectorAll('.gutter-line');
+            logLines.forEach(function(logLine, i) {
+                if (gutterLines[i]) {
+                    gutterLines[i].style.height = logLine.getBoundingClientRect().height + 'px';
+                }
+            });
+        }
+
+        function syncGutter(paneId) {
+            const ids = { system: 'system-chat-log', bot: 'bot-log-viewer', editor: 'editor-textarea' };
+            const logElement = document.getElementById(ids[paneId] || 'system-chat-log');
+            const gutterElement = document.getElementById(paneId + '-gutter');
+            if (logElement && gutterElement) {
+                gutterElement.scrollTop = logElement.scrollTop;
+            }
+        }
+
         async function loadSystemLog() {
             if (document.activeElement === systemChatLog) return;
 
@@ -1568,11 +1883,14 @@ const html = `<!DOCTYPE html>
 
                 const stickToBottom = isNearBottom(systemChatLog) || !lastLogText;
                 lastLogText = text;
-                systemChatLog.value = text;
+                systemChatLog.innerHTML = formatTextAsHtml(text);
+                updateGutter('system', text);
+                syncGutterHeights('system');
 
                 if (stickToBottom) {
                     systemChatLog.scrollTop = systemChatLog.scrollHeight;
                 }
+                syncGutter('system');
             } catch (error) {
             }
         }
@@ -1623,6 +1941,8 @@ const html = `<!DOCTYPE html>
                 if (!response.ok) throw new Error('Failed');
                 const text = await response.text();
                 editorTextarea.value = text;
+                updateGutter('editor', text);
+                syncGutter('editor');
             } catch (e) {
                 editorTextarea.value = 'Failed to load file.';
             }
@@ -1702,11 +2022,14 @@ const html = `<!DOCTYPE html>
 
                 const stickToBottom = isNearBottom(botLogViewer) || !lastBotLogText;
                 lastBotLogText = text;
-                botLogViewer.value = text;
+                botLogViewer.innerHTML = formatTextAsHtml(text);
+                updateGutter('bot', text);
+                syncGutterHeights('bot');
 
                 if (stickToBottom) {
                     botLogViewer.scrollTop = botLogViewer.scrollHeight;
                 }
+                syncGutter('bot');
             } catch (error) {
             }
         }
@@ -1717,13 +2040,15 @@ const html = `<!DOCTYPE html>
 
             if (kind === 'system') {
                 lastLogText = '';
-                systemChatLog.value = '';
+                systemChatLog.innerHTML = '';
+                updateGutter('system', '');
                 await loadSystemLog();
                 return;
             }
 
             lastBotLogText = '';
-            botLogViewer.value = '';
+            botLogViewer.innerHTML = '';
+            updateGutter('bot', '');
             await loadBotLog();
         }
 
@@ -1948,7 +2273,14 @@ const html = `<!DOCTYPE html>
         });
 
         saveMdBtn.addEventListener('click', () => saveMdFile());
+        editorTextarea.addEventListener('input', function() {
+            updateGutter('editor', editorTextarea.value);
+        });
 
+        window.addEventListener('resize', function() {
+            syncGutterHeights('system');
+            syncGutterHeights('bot');
+        });
         window.setInterval(loadStatus, 2000);
         window.setInterval(loadSystemLog, 1500);
         window.setInterval(loadBotLog, 1500);
@@ -2244,6 +2576,75 @@ const server = http.createServer((req, res) => {
                 res.writeHead(500, { 'Content-Type': 'application/json' });
                 res.end(JSON.stringify({ success: false }));
             }
+        });
+        return;
+    }
+
+    if (pathname === '/api/get-any-file' && method === 'GET') {
+        const fileParam = requestUrl.searchParams.get('path');
+        if (!fileParam) {
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: false, error: 'No path' }));
+            return;
+        }
+        const fullPath = resolveWorkspaceFilePath(fileParam);
+        const normalizedWorkspaceRoot = path.normalize(__dirname + path.sep);
+        const normalizedFullPath = path.normalize(fullPath || '');
+        if (!normalizedFullPath.startsWith(normalizedWorkspaceRoot) && normalizedFullPath !== path.normalize(__dirname)) {
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: false, error: 'Access Denied' }));
+            return;
+        }
+        if (!fs.existsSync(fullPath)) {
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: false, error: 'File Not Found' }));
+            return;
+        }
+        const stats = fs.statSync(fullPath);
+        if (stats.isDirectory()) {
+            fs.promises.readdir(fullPath, { withFileTypes: true }).then((entries) => {
+                const preview = entries
+                    .slice(0, 30)
+                    .map((entry) => `${entry.isDirectory() ? '[DIR] ' : ''}${entry.name}`)
+                    .join('\n');
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({
+                    success: true,
+                    isDirectory: true,
+                    isImage: false,
+                    isAudio: false,
+                    content: preview || '(empty directory)',
+                    path: fileParam
+                }));
+            }).catch((err) => {
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ success: false, error: err.message }));
+            });
+            return;
+        }
+        const ext = path.extname(fullPath).toLowerCase();
+        const isImage = ['.png', '.jpg', '.jpeg', '.webp', '.gif'].includes(ext);
+        const isAudio = ['.mp3', '.wav', '.ogg', '.m4a'].includes(ext);
+        const promise = (isImage || isAudio) ? fs.promises.readFile(fullPath) : fs.promises.readFile(fullPath, 'utf8');
+        
+        promise.then(data => {
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            if (isImage) {
+                const base64 = data.toString('base64');
+                const mimeMap = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.gif': 'image/gif' };
+                const mime = mimeMap[ext] || 'image/png';
+                res.end(JSON.stringify({ success: true, isImage: true, isAudio: false, content: `data:${mime};base64,${base64}`, path: fileParam }));
+            } else if (isAudio) {
+                const base64 = data.toString('base64');
+                const mimeMap = { '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.ogg': 'audio/ogg', '.m4a': 'audio/mp4' };
+                const mime = mimeMap[ext] || 'audio/mpeg';
+                res.end(JSON.stringify({ success: true, isDirectory: false, isImage: false, isAudio: true, content: `data:${mime};base64,${base64}`, path: fileParam }));
+            } else {
+                res.end(JSON.stringify({ success: true, isDirectory: false, isImage: false, isAudio: false, content: data, path: fileParam }));
+            }
+        }).catch(err => {
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: false, error: err.message }));
         });
         return;
     }
