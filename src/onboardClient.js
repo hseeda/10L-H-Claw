@@ -4,6 +4,12 @@ const { getAvailableModelsList, getCurrentModelInfo, resetToDefaultModel, switch
 const { analyzeLocalMediaFile } = require('./aiTools');
 const historyHandler = require('./historyHandler');
 
+function ensureBotPrefix(text) {
+    const raw = String(text || '').trim();
+    if (!raw) return '🐾';
+    return raw.startsWith('🐾') ? raw : `🐾 ${raw}`;
+}
+
 function formatScheduleStatus(status) {
     const raw = String(status || '').trim().toLowerCase();
     if (!raw) return '-';
@@ -29,53 +35,53 @@ async function handleCommand(cmdText) {
             `🗑️ */delete task <pid>* — Delete specific\n` +
             `⏰ */schedule [start] [end] [step] [prompt]* — Add task\n` +
             `🛑 */stop* — Shut down`;
-        console.log(`📤 [OB] \n${reply}`);
+        console.log(`📤 [OB] \n${ensureBotPrefix(reply)}`);
         return true;
     }
 
     if (cmd === '/get history') {
         const historyText = await historyHandler.getHistory('onboard');
-        console.log(`📤 [OB] \n${historyText || '🐾 No history found.'}`);
+        console.log(`📤 [OB] \n${ensureBotPrefix(historyText || 'No history found.')}`);
         return true;
     }
 
     if (cmd === '/wipe') {
         historyHandler.clearHistory('onboard');
-        console.log(`📤 [OB] 🌀 *History wiped!*`);
+        console.log(`📤 [OB] ${ensureBotPrefix('🌀 *History wiped!*')}`);
         return true;
     }
 
     if (cmd === '/list models') {
-         console.log(`📤 [OB] \n${getAvailableModelsList()}`);
+         console.log(`📤 [OB] \n${ensureBotPrefix(getAvailableModelsList())}`);
          return true;
     }
 
     if (cmd === '/current model') {
-         console.log(`📤 [OB] \n${getCurrentModelInfo()}`);
+         console.log(`📤 [OB] \n${ensureBotPrefix(getCurrentModelInfo())}`);
          return true;
     }
 
     if (cmd === '/reset model') {
-         console.log(`📤 [OB] \n${resetToDefaultModel()}`);
+         console.log(`📤 [OB] \n${ensureBotPrefix(resetToDefaultModel())}`);
          return true;
     }
 
     if (cmd.startsWith('/switch model ')) {
         const targetNum = parseInt(cmd.replace('/switch model ', ''));
-        console.log(`📤 [OB] \n${switchModelByNumber(targetNum)}`);
+        console.log(`📤 [OB] \n${ensureBotPrefix(switchModelByNumber(targetNum))}`);
         return true;
     }
 
     if (cmd.startsWith('/switch image model ')) {
         const targetNum = parseInt(cmd.replace('/switch image model ', ''));
-        console.log(`📤 [OB] \n${switchImageModelByNumber(targetNum)}`);
+        console.log(`📤 [OB] \n${ensureBotPrefix(switchImageModelByNumber(targetNum))}`);
         return true;
     }
 
     if (cmd.startsWith('/wipe tmp')) {
         const { wipeTmpDirectory } = require('./aiTools');
         const count = wipeTmpDirectory();
-        console.log(`📤 [OB] 🐾 *Tmp Wipe complete!* Cleared ${count} files from \`../tmp\`.`);
+        console.log(`📤 [OB] ${ensureBotPrefix(`*Tmp Wipe complete!* Cleared ${count} files from \`../tmp\`.`)}`);
         return true;
     }
 
@@ -83,21 +89,21 @@ async function handleCommand(cmdText) {
         const { getScheduledTasks } = require('./scheduleTool');
         const tasks = getScheduledTasks();
         if (!tasks || tasks.length === 0) {
-            console.log(`📤 [OB] 🐾 *No tasks scheduled.*`);
+            console.log(`📤 [OB] ${ensureBotPrefix('*No tasks scheduled.*')}`);
             return true;
         }
         let reply = "📋 *Scheduled Tasks:\n\n*";
         tasks.forEach(t => {
             reply += `*${t.pid}*\nStart: ${t.start}\nStop: ${t.stop}\nStep: ${t.step_time}\nStatus: ${formatScheduleStatus(t.status)}\nNext: ${t.next_run_time || '-'}\n\n`;
         });
-        console.log(`📤 [OB] \n${reply}`);
+        console.log(`📤 [OB] \n${ensureBotPrefix(reply)}`);
         return true;
     }
 
     if (cmd === '/delete schedule') {
         const { clearAllSchedules } = require('./scheduleTool');
         const reply = clearAllSchedules();
-        console.log(`📤 [OB] ${reply}`);
+        console.log(`📤 [OB] ${ensureBotPrefix(reply)}`);
         return true;
     }
 
@@ -105,14 +111,14 @@ async function handleCommand(cmdText) {
         const pid = cmdText.trim().slice('/delete task '.length).trim();
         const { deleteSchedule } = require('./scheduleTool');
         const reply = deleteSchedule(pid);
-        console.log(`📤 [OB] ${reply}`);
+        console.log(`📤 [OB] ${ensureBotPrefix(reply)}`);
         return true;
     }
 
     if (cmd.startsWith('/schedule ')) {
         const parts = cmdText.trim().split(' ');
         if (parts.length < 5) {
-            console.log(`📤 [OB] 🐾 *Format: /schedule [start] [end] [step] [prompt]*\nExample: \`/schedule 09:00 17:00 30m Check servers\``);
+            console.log(`📤 [OB] ${ensureBotPrefix('*Format: /schedule [start] [end] [step] [prompt]*\nExample: \`/schedule 09:00 17:00 30m Check servers\`')}`);
             return true;
         }
         const start = parts[1];
@@ -128,13 +134,13 @@ async function handleCommand(cmdText) {
             issuer_client: 'onboard',
             issuer_target: 'dashboard'
         });
-        console.log(`📤 [OB] ${reply}`);
+        console.log(`📤 [OB] ${ensureBotPrefix(reply)}`);
         return true;
     }
 
     if (cmd === '/stop') {
         const { stopServer } = require('./serverTools');
-        console.log(`📤 [OB] 🛑 Shutting down server...`);
+        console.log(`📤 [OB] ${ensureBotPrefix('🛑 Shutting down server...')}`);
         stopServer();
         return true;
     }

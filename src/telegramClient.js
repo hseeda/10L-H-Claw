@@ -10,6 +10,12 @@ let highestMessageId = 0;
 let lastKnownUserName = "User";
 let globalWhatsappClient = null;
 
+function ensureBotPrefix(text) {
+    const raw = String(text || '').trim();
+    if (!raw) return '🐾';
+    return raw.startsWith('🐾') ? raw : `🐾 ${raw}`;
+}
+
 function formatScheduleStatus(status) {
     const raw = String(status || '').trim().toLowerCase();
     if (!raw) return '-';
@@ -105,7 +111,7 @@ const tgClient = {
         const url = `https://api.telegram.org/bot${token}/sendMessage`;
         const body = {
             chat_id: chatId,
-            text: useMarkdown ? formatForTelegram(text) : text
+            text: useMarkdown ? formatForTelegram(ensureBotPrefix(text)) : ensureBotPrefix(text)
         };
         if (replyToMessageId) body.reply_to_message_id = replyToMessageId;
         
@@ -215,7 +221,7 @@ const tgClient = {
         formData.append(field, blob, path.basename(filePath));
 
         if (caption) {
-            formData.append('caption', formatForTelegram(caption));
+            formData.append('caption', formatForTelegram(ensureBotPrefix(caption)));
             formData.append('parse_mode', 'Markdown');
         }
 
@@ -232,7 +238,7 @@ const tgClient = {
                     console.warn('⚠️ Telegram Media Caption parse error. Retrying as plaintext...');
                     formData.delete('caption');
                     formData.delete('parse_mode');
-                    formData.append('caption', caption);
+                    formData.append('caption', ensureBotPrefix(caption));
                     const retryResponse = await fetch(url, { method: 'POST', body: formData });
                     return await retryResponse.json();
                 }

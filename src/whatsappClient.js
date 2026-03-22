@@ -7,6 +7,12 @@ let client = null;
 let whatsappRuntimeStatus = 'initializing';
 const historyHandler = require('./historyHandler');
 
+function ensureBotPrefix(text) {
+    const raw = String(text || '').trim();
+    if (!raw) return '🐾';
+    return raw.startsWith('🐾') ? raw : `🐾 ${raw}`;
+}
+
 function formatScheduleStatus(status) {
     const raw = String(status || '').trim().toLowerCase();
     if (!raw) return '-';
@@ -162,11 +168,11 @@ async function cleanUpMessages(msg) {
                 }
             }
         }
-        await client.sendMessage(msg.to, `ℹ️ Cleanup complete! Deleted ${deletedCount} messages from the past 24 hours.`);
+        await client.sendMessage(msg.to, ensureBotPrefix(`ℹ️ Cleanup complete! Deleted ${deletedCount} messages from the past 24 hours.`));
         console.log(`ℹ️ Cleanup complete! Deleted ${deletedCount} messages from the past 24 hours.`);
     } catch (error) {
         console.error('Error during cleanup:', error);
-        await client.sendMessage(msg.to, 'ℹ️ Oops, an error occurred during cleanup.');
+        await client.sendMessage(msg.to, ensureBotPrefix('ℹ️ Oops, an error occurred during cleanup.'));
         console.log('ℹ️ Oops, an error occurred during cleanup.');
     }
     return;
@@ -195,7 +201,7 @@ async function listContacts(msg) {
         const results = filtered.slice(0, limit);
         
         if (results.length === 0) {
-            await client.sendMessage(msg.to, `ℹ️ No contacts found matching "${query}".`);
+            await client.sendMessage(msg.to, ensureBotPrefix(`ℹ️ No contacts found matching "${query}".`));
             return;
         }
 
@@ -213,7 +219,7 @@ async function listContacts(msg) {
         await client.sendMessage(msg.to, reply);
     } catch (error) {
         console.error('Error listing contacts:', error);
-        await client.sendMessage(msg.to, `❌ Failed to list contacts: ${error.message}`);
+        await client.sendMessage(msg.to, ensureBotPrefix(`❌ Failed to list contacts: ${error.message}`));
     }
 }
 
@@ -235,7 +241,7 @@ async function listCommands(msg) {
         `🗑️ */delete task <pid>* — Delete specific\n` +
         `⏰ */schedule [start] [end] [step] [prompt]* — Add task\n` +
         `🛑 */stop* — Shut down`;
-    await client.sendMessage(msg.to, reply);
+    await client.sendMessage(msg.to, ensureBotPrefix(reply));
 }
 
 let isHandlingCommand = false;
@@ -250,7 +256,7 @@ async function builtInCommands(msg) {
     }
     if (cmd === '/get history') {
         const historyText = await historyHandler.getHistory('whatsapp', msg);
-        await client.sendMessage(msg.to, historyText || '🐾 No history found.');
+        await client.sendMessage(msg.to, ensureBotPrefix(historyText || 'No history found.'));
         return true;
     }
 
@@ -261,33 +267,33 @@ async function builtInCommands(msg) {
 
     if (cmd === '/list models') {
         const reply = getAvailableModelsList();
-        await client.sendMessage(msg.to, reply);
+        await client.sendMessage(msg.to, ensureBotPrefix(reply));
         return true;
     }
 
     if (cmd === '/current model') {
         const reply = getCurrentModelInfo();
-        await client.sendMessage(msg.to, reply);
+        await client.sendMessage(msg.to, ensureBotPrefix(reply));
         return true;
     }
 
     if (cmd === '/reset model') {
         const reply = resetToDefaultModel();
-        await client.sendMessage(msg.to, reply);
+        await client.sendMessage(msg.to, ensureBotPrefix(reply));
         return true;
     }
 
     if (cmd.startsWith('/switch image model ')) {
         const targetNum = parseInt(msg.body.trim().toLowerCase().replace('/switch image model ', ''));
         const reply = switchImageModelByNumber(targetNum);
-        await client.sendMessage(msg.to, reply);
+        await client.sendMessage(msg.to, ensureBotPrefix(reply));
         return true;
     }
 
     if (cmd.startsWith('/switch model ')) {
         const targetNum = parseInt(msg.body.trim().toLowerCase().replace('/switch model ', ''));
         const reply = switchModelByNumber(targetNum);
-        await client.sendMessage(msg.to, reply);
+        await client.sendMessage(msg.to, ensureBotPrefix(reply));
         return true;
     }
 
@@ -300,21 +306,21 @@ async function builtInCommands(msg) {
         const { getScheduledTasks } = require('./scheduleTool');
         const tasks = getScheduledTasks();
         if (!tasks || tasks.length === 0) {
-            await client.sendMessage(msg.to, "🐾 *No tasks scheduled.*");
+            await client.sendMessage(msg.to, ensureBotPrefix("*No tasks scheduled.*"));
             return true;
         }
         let reply = "📋 *Scheduled Tasks:\n\n*";
         tasks.forEach(t => {
             reply += `*${t.pid}*\nStart: ${t.start}\nStop: ${t.stop}\nStep: ${t.step_time}\nStatus: ${formatScheduleStatus(t.status)}\nNext: ${t.next_run_time || '-'}\n\n`;
         });
-        await client.sendMessage(msg.to, reply);
+        await client.sendMessage(msg.to, ensureBotPrefix(reply));
         return true;
     }
 
     if (cmd === '/delete schedule') {
         const { clearAllSchedules } = require('./scheduleTool');
         const reply = clearAllSchedules();
-        await client.sendMessage(msg.to, reply);
+        await client.sendMessage(msg.to, ensureBotPrefix(reply));
         return true;
     }
 
@@ -322,14 +328,14 @@ async function builtInCommands(msg) {
         const pid = msg.body.trim().slice('/delete task '.length).trim();
         const { deleteSchedule } = require('./scheduleTool');
         const reply = deleteSchedule(pid);
-        await client.sendMessage(msg.to, reply);
+        await client.sendMessage(msg.to, ensureBotPrefix(reply));
         return true;
     }
 
     if (cmd.startsWith('/schedule ')) {
         const parts = msg.body.trim().split(' ');
         if (parts.length < 5) {
-            await client.sendMessage(msg.to, "🐾 *Format: /schedule [start] [end] [step] [prompt]*\nExample: `/schedule 09:00 17:00 30m Check servers`");
+            await client.sendMessage(msg.to, ensureBotPrefix("*Format: /schedule [start] [end] [step] [prompt]*\nExample: `/schedule 09:00 17:00 30m Check servers`"));
             return true;
     }
         const start = parts[1];
@@ -344,7 +350,7 @@ async function builtInCommands(msg) {
             issuer_client: 'whatsapp',
             issuer_target: msg.to
         });
-        await client.sendMessage(msg.to, reply);
+        await client.sendMessage(msg.to, ensureBotPrefix(reply));
         return true;
     }
 
@@ -356,7 +362,7 @@ async function builtInCommands(msg) {
     if(msg.body.trim().toLowerCase().startsWith('/wipe tmp')) {
         const { wipeTmpDirectory } = require('./aiTools');
         const count = wipeTmpDirectory();
-        await msg.reply(`🐾 *Tmp Wipe complete!* Cleared ${count} files from \`../tmp\`.`);
+        await msg.reply(ensureBotPrefix(`*Tmp Wipe complete!* Cleared ${count} files from \`../tmp\`.`));
         return true;
     }
 
