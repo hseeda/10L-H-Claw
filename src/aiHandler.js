@@ -2,6 +2,7 @@ const { GoogleGenAI } = require("@google/genai");
 const OpenAI = require("openai");
 const { getActiveModel, getAvailableModels, activeModelFallback} = require ('./Models');
 const { GEMINI_TOOLS, OPENAI_TOOLS, executeTool } = require('./aiTools');
+const { recordTokenUsage } = require('./tokenUsageStore');
 
 
 const geminiClient = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
@@ -40,6 +41,10 @@ function providerEmoji(provider) {
   if (provider === 'openai' || provider === 'chatgpt') return '🤖';
   if (provider === 'anthropic' || provider === 'claude') return '🧠';
   return '🤔';
+}
+
+function getUsagePlatform(platform = 'whatsapp') {
+  return parsePlatformContext(platform).platformName;
 }
 
 function getSystemPrompt(platform = 'whatsapp', userPrompt = '') {
@@ -93,6 +98,17 @@ async function getGeminiResponse(modelName, prompt, client, chatHistory = "", pl
     cumulativeTotalTokens += response.usageMetadata.totalTokenCount || 0;
     console.log("🪙  PT = ", response.usageMetadata.promptTokenCount," CT= ", response.usageMetadata.candidatesTokenCount,
     " TT = ", response.usageMetadata.totalTokenCount, " CTT = ", cumulativeTotalTokens);       // total
+    recordTokenUsage({
+      provider: 'gemini',
+      model: modelName,
+      platform: getUsagePlatform(platform),
+      usage: {
+        input_tokens: response.usageMetadata.promptTokenCount || 0,
+        output_tokens: response.usageMetadata.candidatesTokenCount || 0,
+        total_tokens: response.usageMetadata.totalTokenCount || 0,
+        cached_tokens: response.usageMetadata.cachedContentTokenCount || 0,
+      },
+    });
     //+++++++++++++++++++++++++++++++
 
     // Check if the model wants to call a tool
@@ -170,6 +186,18 @@ async function getOpenAIResponse(modelName, prompt, client, chatHistory = "", pl
     cumulativeTotalTokens += response.usage.total_tokens || 0;
     console.log("🪙  IT = ", response.usage.prompt_tokens," OT= ", response.usage.completion_tokens,
     " TT = ", response.usage.total_tokens, " CTT = ", cumulativeTotalTokens);       // total
+    recordTokenUsage({
+      provider: 'openai',
+      model: modelName,
+      platform: getUsagePlatform(platform),
+      usage: {
+        input_tokens: response.usage.prompt_tokens || 0,
+        output_tokens: response.usage.completion_tokens || 0,
+        total_tokens: response.usage.total_tokens || 0,
+        reasoning_tokens: response.usage.completion_tokens_details?.reasoning_tokens || 0,
+        cached_tokens: response.usage.prompt_tokens_details?.cached_tokens || 0,
+      },
+    });
     //+++++++++++++++++++++++++++++++
 
     const choice = response.choices[0];

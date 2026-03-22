@@ -4,6 +4,7 @@ const path = require("path");
 const { MessageMedia } = require("whatsapp-web.js");
 const OpenAI = require("openai");
 const { GoogleGenAI } = require("@google/genai");
+const { recordTokenUsage } = require("./tokenUsageStore");
 const mailManager = require("./mailTools");
 // telegramManager is lazy-loaded in executeTool to avoid circular dependency with aiHandler
 
@@ -600,6 +601,16 @@ async function executeTool(name, args, client = null, platform = 'whatsapp') {
             const fn = `img_oai_${Date.now()}.png`;
             const fp = path.join(tmpDir, fn);
             fs.writeFileSync(fp, buffer);
+            recordTokenUsage({
+              provider: "openai",
+              model: entry.model,
+              platform: parsePlatformContext(platform).platformName,
+              usage: {
+                input_tokens: response.usage?.input_tokens || response.usage?.prompt_tokens || 0,
+                output_tokens: response.usage?.output_tokens || response.usage?.completion_tokens || 0,
+                total_tokens: response.usage?.total_tokens || 0,
+              },
+            });
             console.log(`💾 Saved OpenAI image to: ${fp}`);
             return `✅ Image: ${fp}`;
           }
@@ -607,6 +618,16 @@ async function executeTool(name, args, client = null, platform = 'whatsapp') {
           const fn = `img_oai_${Date.now()}.png`;
           const fp = path.join(tmpDir, fn);
           fs.writeFileSync(fp, buffer);
+          recordTokenUsage({
+            provider: "openai",
+            model: entry.model,
+            platform: parsePlatformContext(platform).platformName,
+            usage: {
+              input_tokens: response.usage?.input_tokens || response.usage?.prompt_tokens || 0,
+              output_tokens: response.usage?.output_tokens || response.usage?.completion_tokens || 0,
+              total_tokens: response.usage?.total_tokens || 0,
+            },
+          });
           console.log(`💾 Saved OpenAI image to: ${fp}`);
           return `✅ Image: ${fp}`;
         }
@@ -632,6 +653,17 @@ async function executeTool(name, args, client = null, platform = 'whatsapp') {
           const fn = `img_gem_${Date.now()}.png`;
           const fp = path.join(tmpDir, fn);
           fs.writeFileSync(fp, buffer);
+          recordTokenUsage({
+            provider: "gemini",
+            model: entry.model,
+            platform: parsePlatformContext(platform).platformName,
+            usage: {
+              input_tokens: response.usageMetadata?.promptTokenCount || 0,
+              output_tokens: response.usageMetadata?.candidatesTokenCount || 0,
+              total_tokens: response.usageMetadata?.totalTokenCount || 0,
+              cached_tokens: response.usageMetadata?.cachedContentTokenCount || 0,
+            },
+          });
           console.log(`💾 Saved Gemini image to: ${fp}`);
           return `✅ Image: ${fp}`;
         }
@@ -665,6 +697,17 @@ async function executeTool(name, args, client = null, platform = 'whatsapp') {
           const fn = `img_img_${Date.now()}.png`;
           const fp = path.join(tmpDir, fn);
           fs.writeFileSync(fp, buffer);
+          recordTokenUsage({
+            provider: "imagen",
+            model: entry.model,
+            platform: parsePlatformContext(platform).platformName,
+            usage: {
+              input_tokens: response.usageMetadata?.promptTokenCount || 0,
+              output_tokens: response.usageMetadata?.candidatesTokenCount || 0,
+              total_tokens: response.usageMetadata?.totalTokenCount || 0,
+              cached_tokens: response.usageMetadata?.cachedContentTokenCount || 0,
+            },
+          });
           console.log(`💾 Saved Imagen image to: ${fp}`);
           return `✅ Image: ${fp}`;
         }

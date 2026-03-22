@@ -3,6 +3,7 @@ const fs = require('fs');
 const { fork, exec, execFile } = require('child_process');
 const path = require('path');
 const { getScheduledTasks, getStoredScheduledTasks, createSchedule, updateSchedule, deleteSchedule } = require('./src/scheduleTool');
+const { getTokenUsageSummary, clearTokenUsageHistory } = require('./src/tokenUsageStore');
 const oldLog = console.log;
 console.log = () => {}; // Suppress dotenv tip/verbose output
 require('dotenv').config({ path: path.join('secrets', '.env'), quiet: true });
@@ -1329,6 +1330,10 @@ const html = `<!DOCTYPE html>
                         <i class="fa-solid fa-heart-crack" aria-hidden="true" style="color: var(--danger);"></i>
                         <span>Clean Heartbeat</span>
                     </button>
+                    <button class="nav-item" id="sidebar-clear-token-usage-btn" type="button" data-sidebar-item>
+                        <i class="fa-solid fa-chart-line" aria-hidden="true" style="color: var(--danger);"></i>
+                        <span>Clear Token History</span>
+                    </button>
                 </div>
             </section>
 
@@ -1387,6 +1392,10 @@ const html = `<!DOCTYPE html>
                     <button class="nav-item" id="nav-schedule" type="button" data-sidebar-item>
                         <i class="fa-solid fa-calendar-check" aria-hidden="true"></i>
                         <span>Manage Tasks</span>
+                    </button>
+                    <button class="nav-item" id="nav-token-usage" type="button" data-sidebar-item>
+                        <i class="fa-solid fa-chart-column" aria-hidden="true"></i>
+                        <span>Token Usage</span>
                     </button>
                 </div>
             </section>
@@ -1532,6 +1541,80 @@ const html = `<!DOCTYPE html>
                     <div id="schedule-table-wrap"><p style="color:var(--muted);margin:0;">Loading...</p></div>
                 </div>
             </section>
+
+            <section class="settings-pane" id="token-usage-pane" aria-label="Token Usage">
+                <div class="settings-card" style="max-width:100%;">
+                    <div style="display:flex;align-items:flex-end;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:18px;">
+                        <div>
+                            <h3 style="margin:0 0 6px;">Token Usage</h3>
+                            <p style="margin:0;color:var(--muted);">Persistent AI token accounting across models, time windows, and token types.</p>
+                        </div>
+                        <button id="refresh-token-usage-btn" class="action-pill start" type="button">
+                            <i class="fa-solid fa-rotate-right" aria-hidden="true"></i>
+                            <span>Refresh</span>
+                        </button>
+                    </div>
+                    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:16px;">
+                        <div class="settings-field" style="margin:0;">
+                            <label for="token-usage-period">Period</label>
+                            <select class="settings-input" id="token-usage-period">
+                                <option value="day">Day</option>
+                                <option value="week">Week</option>
+                                <option value="month">Month</option>
+                                <option value="all">All</option>
+                            </select>
+                        </div>
+                        <div class="settings-field" style="margin:0;">
+                            <label for="token-usage-group-by">Group By</label>
+                            <select class="settings-input" id="token-usage-group-by">
+                                <option value="period">Period</option>
+                                <option value="model">Model</option>
+                                <option value="provider">Provider</option>
+                                <option value="platform">Platform</option>
+                            </select>
+                        </div>
+                        <div class="settings-field" style="margin:0;">
+                            <label for="token-usage-token-type">Token Type</label>
+                            <select class="settings-input" id="token-usage-token-type">
+                                <option value="total_tokens">Total</option>
+                                <option value="input_tokens">Input</option>
+                                <option value="output_tokens">Output</option>
+                                <option value="cached_tokens">Cached</option>
+                                <option value="reasoning_tokens">Reasoning</option>
+                            </select>
+                        </div>
+                        <div class="settings-field" style="margin:0;">
+                            <label for="token-usage-model-filter">Model</label>
+                            <select class="settings-input" id="token-usage-model-filter">
+                                <option value="">All Models</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div id="token-usage-summary-cards" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:18px;"></div>
+                    <div class="settings-card" style="background:var(--bg);margin:0 0 16px;max-width:none;">
+                        <h3 style="margin:0 0 10px;">Model Comparison</h3>
+                        <div id="token-usage-chart" style="min-height:280px;"></div>
+                    </div>
+                    <div class="settings-card" style="background:var(--bg);margin:0 0 16px;max-width:none;">
+                        <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+                            <h3 style="margin:0 0 10px;">Usage Over Time</h3>
+                            <button id="clear-token-usage-btn" class="clean-btn" type="button" style="margin-left:auto;">
+                                <i class="fa-solid fa-trash-can" aria-hidden="true"></i>
+                                <span>Clear History</span>
+                            </button>
+                        </div>
+                        <div id="token-usage-trend-chart" style="min-height:280px;"></div>
+                    </div>
+                    <div class="settings-card" style="background:var(--bg);margin:0 0 16px;max-width:none;">
+                        <h3 style="margin:0 0 10px;">Smart Summary</h3>
+                        <div id="token-usage-insights" style="color:var(--text);line-height:1.6;"></div>
+                    </div>
+                    <div class="settings-card" style="background:var(--bg);margin:0;max-width:none;">
+                        <h3 style="margin:0 0 10px;">Breakdown</h3>
+                        <div id="token-usage-table-wrap"><p style="color:var(--muted);margin:0;">Loading...</p></div>
+                    </div>
+                </div>
+            </section>
         </main>
     </div>
 
@@ -1602,12 +1685,14 @@ const html = `<!DOCTYPE html>
         const navSystemChat = document.getElementById('nav-system-chat');
         const navBotLogs = document.getElementById('nav-bot-logs');
         const navSettings = document.getElementById('nav-settings');
+        const navTokenUsage = document.getElementById('nav-token-usage');
         const statusPill = document.getElementById('status-pill');
         const workspaceIcon = document.getElementById('workspace-icon');
         const workspaceTitle = document.getElementById('workspace-title');
         const workspace = document.querySelector('.workspace');
         const settingsPane = document.getElementById('settings-pane');
         const schedulePane = document.getElementById('schedule-pane');
+        const tokenUsagePane = document.getElementById('token-usage-pane');
         const systemLogPane = document.getElementById('system-log-pane');
         const botLogPane = document.getElementById('bot-log-pane');
         const systemChatLog = document.getElementById('system-chat-log');
@@ -1625,6 +1710,7 @@ const html = `<!DOCTYPE html>
         const cleanBotLogBtn = document.getElementById('clean-bot-log-btn');
         const sidebarClearTmpBtn = document.getElementById('sidebar-clear-tmp-btn');
         const sidebarClearHeartbeatBtn = document.getElementById('sidebar-clear-heartbeat-btn');
+        const sidebarClearTokenUsageBtn = document.getElementById('sidebar-clear-token-usage-btn');
         const mdFileList = document.getElementById('md-file-list');
         const secretFileList = document.getElementById('secret-file-list');
         const saveMdBtn = document.getElementById('save-md-btn');
@@ -1634,6 +1720,17 @@ const html = `<!DOCTYPE html>
         let activeMdFile = '';
         const defaultBotModelSelect = document.getElementById('default-bot-model');
         const defaultImageModelSelect = document.getElementById('default-image-model');
+        const tokenUsagePeriod = document.getElementById('token-usage-period');
+        const tokenUsageGroupBy = document.getElementById('token-usage-group-by');
+        const tokenUsageTokenType = document.getElementById('token-usage-token-type');
+        const tokenUsageModelFilter = document.getElementById('token-usage-model-filter');
+        const tokenUsageSummaryCards = document.getElementById('token-usage-summary-cards');
+        const tokenUsageChart = document.getElementById('token-usage-chart');
+        const tokenUsageTrendChart = document.getElementById('token-usage-trend-chart');
+        const tokenUsageInsights = document.getElementById('token-usage-insights');
+        const tokenUsageTableWrap = document.getElementById('token-usage-table-wrap');
+        const refreshTokenUsageBtn = document.getElementById('refresh-token-usage-btn');
+        const clearTokenUsageBtn = document.getElementById('clear-token-usage-btn');
         const sectionToggles = document.querySelectorAll('[data-section-toggle]');
         let actionInFlight = false;
         let lastLogText = '';
@@ -1642,6 +1739,7 @@ const html = `<!DOCTYPE html>
         let activeConversationSource = 'system';
         let sendInFlight = false;
         let settingsLoaded = false;
+        let tokenUsageModelsLoaded = false;
         const composerHistoryStorageKey = 'hclaw-onboard-composer-history';
         const composerHistory = [];
         let composerHistoryIndex = -1;
@@ -2062,6 +2160,15 @@ const html = `<!DOCTYPE html>
                 return;
             }
 
+            if (activeView === 'token-usage') {
+                workspaceTitle.textContent = 'Token Usage';
+                workspaceIcon.className = 'fa-solid fa-chart-column';
+                cleanSystemLogBtn.style.display = 'none';
+                cleanBotLogBtn.style.display = 'none';
+                saveMdBtn.style.display = 'none';
+                return;
+            }
+
             const meta = getConversationMeta(activeConversationSource);
             workspaceTitle.textContent = meta.title;
             workspaceIcon.className = meta.icon;
@@ -2133,9 +2240,11 @@ const html = `<!DOCTYPE html>
             const showSettings = view === 'settings';
             const showEditor = view === 'editor';
             const showSchedule = view === 'schedule';
-            workspace.classList.toggle('hidden', showSettings || showSchedule);
+            const showTokenUsage = view === 'token-usage';
+            workspace.classList.toggle('hidden', showSettings || showSchedule || showTokenUsage);
             settingsPane.classList.toggle('visible', showSettings);
             schedulePane.classList.toggle('visible', showSchedule);
+            tokenUsagePane.classList.toggle('visible', showTokenUsage);
             systemLogPane.classList.toggle('visible', !showBot && !showEditor);
             botLogPane.classList.toggle('visible', showBot);
             editorPane.classList.toggle('visible', showEditor);
@@ -2143,6 +2252,7 @@ const html = `<!DOCTYPE html>
             editorPane.setAttribute('aria-hidden', String(!showEditor));
             syncWorkspaceHeader();
             if (showSchedule) { loadSchedules(); _schedRefreshStart(); } else { _schedRefreshStop(); }
+            if (showTokenUsage) { loadTokenUsageDashboard(); }
         }
 
         let _schedRefreshTimer = null;
@@ -2202,6 +2312,310 @@ const html = `<!DOCTYPE html>
                     secretFileList.appendChild(btn);
                 });
             } catch (e) {}
+        }
+
+        function formatTokenLabel(tokenType) {
+            if (tokenType === 'input_tokens') return 'Input Tokens';
+            if (tokenType === 'output_tokens') return 'Output Tokens';
+            if (tokenType === 'cached_tokens') return 'Cached Tokens';
+            if (tokenType === 'reasoning_tokens') return 'Reasoning Tokens';
+            return 'Total Tokens';
+        }
+
+        function formatNumber(value) {
+            return Number(value || 0).toLocaleString();
+        }
+
+        function renderTokenUsageCards(summary) {
+            const selectedLabel = formatTokenLabel(summary.filters?.token_type || 'total_tokens');
+            tokenUsageSummaryCards.innerHTML = [
+                { label: selectedLabel, value: formatNumber(summary.selected_token_total ?? summary.totals?.total_tokens ?? 0) },
+                { label: 'Calls', value: formatNumber(summary.totals?.calls || 0) },
+                { label: 'Input Tokens', value: formatNumber(summary.totals?.input_tokens || 0) },
+                { label: 'Output Tokens', value: formatNumber(summary.totals?.output_tokens || 0) },
+            ].map((card) => (
+                '<div class="settings-card" style="margin:0;max-width:none;background:var(--bg);">' +
+                    '<div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;">' + escapeHtml(card.label) + '</div>' +
+                    '<div style="font-size:28px;font-weight:800;color:var(--text);margin-top:8px;">' + escapeHtml(card.value) + '</div>' +
+                '</div>'
+            )).join('');
+        }
+
+        function renderTokenUsageChart(summary) {
+            const entries = Array.isArray(summary.entries) ? summary.entries : [];
+            const tokenType = summary.filters?.token_type || 'total_tokens';
+            if (!entries.length) {
+                tokenUsageChart.innerHTML = '<p style="color:var(--muted);margin:0;">No token usage recorded yet.</p>';
+                return;
+            }
+
+            const labels = Array.from(new Set(entries.map((entry) => String(entry.period || 'all')))).sort();
+            const models = Array.from(new Set(entries.map((entry) => String(entry.model || 'Unknown').trim() || 'Unknown'))).sort();
+            const values = entries.map((entry) => Number(entry.selected_token_total ?? entry.totals?.[tokenType] ?? 0));
+            const maxValue = Math.max(...values, 1);
+            const width = 860;
+            const height = 320;
+            const padding = { top: 24, right: 24, bottom: 92, left: 64 };
+            const chartWidth = width - padding.left - padding.right;
+            const chartHeight = height - padding.top - padding.bottom;
+            const colors = ['#2563eb', '#f97316', '#16a34a', '#9333ea', '#dc2626', '#0f766e', '#ca8a04', '#db2777'];
+            const groupCount = Math.max(labels.length, 1);
+            const groupGap = 18;
+            const usableWidth = chartWidth - ((groupCount - 1) * groupGap);
+            const groupWidth = usableWidth / groupCount;
+            const innerGap = 6;
+            const barWidth = Math.max(10, (groupWidth - ((models.length - 1) * innerGap)) / Math.max(models.length, 1));
+            const yTickCount = 4;
+            const yTicks = Array.from({ length: yTickCount + 1 }, (_, index) => {
+                const value = Math.round((maxValue / yTickCount) * index);
+                const y = padding.top + chartHeight - Math.round((value / maxValue) * chartHeight);
+                return { value, y };
+            });
+
+            const bars = labels.map((label, labelIndex) => {
+                const groupX = padding.left + (labelIndex * (groupWidth + groupGap));
+                const groupBars = models.map((model, modelIndex) => {
+                    const color = colors[modelIndex % colors.length];
+                    const hit = entries.find((entry) => String(entry.period || 'all') === label && (String(entry.model || 'Unknown').trim() || 'Unknown') === model);
+                    const value = Number(hit ? (hit.selected_token_total ?? hit.totals?.[tokenType] ?? 0) : 0);
+                    const barHeight = maxValue > 0 ? Math.max(2, Math.round((value / maxValue) * chartHeight)) : 2;
+                    const x = groupX + (modelIndex * (barWidth + innerGap));
+                    const y = padding.top + (chartHeight - barHeight);
+                    return '<g>' +
+                        '<title>' + escapeHtml(label) + ' | ' + escapeHtml(model) + ': ' + escapeHtml(formatNumber(value)) + ' ' + escapeHtml(formatTokenLabel(tokenType)) + '</title>' +
+                        '<rect x="' + x + '" y="' + y + '" width="' + barWidth + '" height="' + barHeight + '" rx="6" fill="' + color + '"></rect>' +
+                        '<text x="' + (x + (barWidth / 2)) + '" y="' + Math.max(padding.top + 12, y - 6) + '" text-anchor="middle" fill="#0f172a" font-size="10">' + escapeHtml(formatNumber(value)) + '</text>' +
+                    '</g>';
+                }).join('');
+                return groupBars +
+                    '<text x="' + (groupX + (groupWidth / 2)) + '" y="' + (height - 34) + '" text-anchor="middle" fill="#64748b" font-size="11">' + escapeHtml(label) + '</text>';
+            }).join('');
+
+            const legend = models.map((model, modelIndex) => {
+                const color = colors[modelIndex % colors.length];
+                const x = padding.left + ((modelIndex % 3) * 220);
+                const y = height - 8 - (Math.floor(modelIndex / 3) * 16);
+                return '<g><rect x="' + x + '" y="' + (y - 10) + '" width="12" height="12" rx="3" fill="' + color + '"></rect><text x="' + (x + 18) + '" y="' + y + '" fill="#334155" font-size="11">' + escapeHtml(model) + '</text></g>';
+            }).join('');
+            const yGuides = yTicks.map((tick) =>
+                '<g>' +
+                    '<line x1="' + padding.left + '" y1="' + tick.y + '" x2="' + (width - padding.right) + '" y2="' + tick.y + '" stroke="#e2e8f0" stroke-width="1"></line>' +
+                    '<text x="' + (padding.left - 10) + '" y="' + (tick.y + 4) + '" text-anchor="end" fill="#64748b" font-size="11">' + escapeHtml(formatNumber(tick.value)) + '</text>' +
+                '</g>'
+            ).join('');
+
+            tokenUsageChart.innerHTML = '<svg viewBox="0 0 ' + width + ' ' + height + '" width="100%" height="' + height + '" role="img" aria-label="Token usage chart">' +
+                '<rect x="0" y="0" width="' + width + '" height="' + height + '" fill="#ffffff"></rect>' +
+                yGuides +
+                '<line x1="' + padding.left + '" y1="' + (padding.top + chartHeight) + '" x2="' + (width - padding.right) + '" y2="' + (padding.top + chartHeight) + '" stroke="#cbd5e1" stroke-width="1.5"></line>' +
+                '<line x1="' + padding.left + '" y1="' + padding.top + '" x2="' + padding.left + '" y2="' + (padding.top + chartHeight) + '" stroke="#cbd5e1" stroke-width="1.5"></line>' +
+                '<text x="' + padding.left + '" y="' + (padding.top - 6) + '" fill="#475569" font-size="12">' + escapeHtml(formatTokenLabel(tokenType)) + '</text>' +
+                bars + legend +
+            '</svg>';
+        }
+
+        function renderTokenUsageTrendChart(summary) {
+            const entries = Array.isArray(summary.entries) ? summary.entries : [];
+            const tokenType = summary.filters?.token_type || 'total_tokens';
+            if (!entries.length) {
+                tokenUsageTrendChart.innerHTML = '<p style="color:var(--muted);margin:0;">No trend data available yet.</p>';
+                return;
+            }
+
+            const pointsByModel = {};
+            entries.forEach((entry) => {
+                const model = String(entry.model || 'Unknown').trim() || 'Unknown';
+                if (!pointsByModel[model]) pointsByModel[model] = [];
+                pointsByModel[model].push({
+                    period: entry.period,
+                    value: Number(entry.selected_token_total ?? entry.totals?.[tokenType] ?? 0),
+                });
+            });
+
+            const labels = Array.from(new Set(entries.map((entry) => String(entry.period || '')))).sort();
+            const models = Object.keys(pointsByModel).sort();
+            const width = 860;
+            const height = 300;
+            const padding = { top: 24, right: 24, bottom: 48, left: 64 };
+            const chartWidth = width - padding.left - padding.right;
+            const chartHeight = height - padding.top - padding.bottom;
+            const allValues = entries.map((entry) => Number(entry.selected_token_total ?? entry.totals?.[tokenType] ?? 0));
+            const maxValue = Math.max(...allValues, 1);
+            const colors = ['#2563eb', '#f97316', '#16a34a', '#9333ea', '#dc2626', '#0f766e', '#ca8a04', '#db2777'];
+            const yTickCount = 4;
+            const yTicks = Array.from({ length: yTickCount + 1 }, (_, index) => {
+                const value = Math.round((maxValue / yTickCount) * index);
+                const y = padding.top + chartHeight - Math.round((value / maxValue) * chartHeight);
+                return { value, y };
+            });
+
+            const labelStep = labels.length > 1 ? chartWidth / (labels.length - 1) : 0;
+            const lines = models.map((model, modelIndex) => {
+                const color = colors[modelIndex % colors.length];
+                const modelPoints = labels.map((label, index) => {
+                    const hit = (pointsByModel[model] || []).find((point) => point.period === label);
+                    const value = hit ? hit.value : 0;
+                    const x = labels.length > 1 ? padding.left + (index * labelStep) : padding.left + (chartWidth / 2);
+                    const y = padding.top + chartHeight - Math.round((value / maxValue) * chartHeight);
+                    return { x, y, value, label };
+                });
+                const pathData = modelPoints.map((point, index) => (index === 0 ? 'M' : 'L') + point.x + ' ' + point.y).join(' ');
+                const circles = modelPoints.map((point) =>
+                    '<g><title>' + escapeHtml(model) + ' | ' + escapeHtml(point.label) + ': ' + escapeHtml(formatNumber(point.value)) + '</title><circle cx="' + point.x + '" cy="' + point.y + '" r="3.5" fill="' + color + '"></circle></g>'
+                ).join('');
+                return '<path d="' + pathData + '" fill="none" stroke="' + color + '" stroke-width="2.5"></path>' + circles;
+            }).join('');
+
+            const xLabels = labels.map((label, index) => {
+                const x = labels.length > 1 ? padding.left + (index * labelStep) : padding.left + (chartWidth / 2);
+                return '<text x="' + x + '" y="' + (height - 18) + '" text-anchor="middle" fill="#64748b" font-size="11">' + escapeHtml(label) + '</text>';
+            }).join('');
+
+            const legend = models.map((model, modelIndex) => {
+                const color = colors[modelIndex % colors.length];
+                const x = padding.left + ((modelIndex % 3) * 220);
+                const y = height - 4 - (Math.floor(modelIndex / 3) * 16);
+                return '<g><rect x="' + x + '" y="' + (y - 10) + '" width="12" height="12" rx="3" fill="' + color + '"></rect><text x="' + (x + 18) + '" y="' + y + '" fill="#334155" font-size="11">' + escapeHtml(model) + '</text></g>';
+            }).join('');
+            const yGuides = yTicks.map((tick) =>
+                '<g>' +
+                    '<line x1="' + padding.left + '" y1="' + tick.y + '" x2="' + (width - padding.right) + '" y2="' + tick.y + '" stroke="#e2e8f0" stroke-width="1"></line>' +
+                    '<text x="' + (padding.left - 10) + '" y="' + (tick.y + 4) + '" text-anchor="end" fill="#64748b" font-size="11">' + escapeHtml(formatNumber(tick.value)) + '</text>' +
+                '</g>'
+            ).join('');
+
+            tokenUsageTrendChart.innerHTML = '<svg viewBox="0 0 ' + width + ' ' + height + '" width="100%" height="' + height + '" role="img" aria-label="Token usage over time chart">' +
+                '<rect x="0" y="0" width="' + width + '" height="' + height + '" fill="#ffffff"></rect>' +
+                yGuides +
+                '<line x1="' + padding.left + '" y1="' + (padding.top + chartHeight) + '" x2="' + (width - padding.right) + '" y2="' + (padding.top + chartHeight) + '" stroke="#cbd5e1" stroke-width="1.5"></line>' +
+                '<line x1="' + padding.left + '" y1="' + padding.top + '" x2="' + padding.left + '" y2="' + (padding.top + chartHeight) + '" stroke="#cbd5e1" stroke-width="1.5"></line>' +
+                lines + xLabels + legend +
+            '</svg>';
+        }
+
+        function renderTokenUsageInsights(summary) {
+            const entries = Array.isArray(summary.entries) ? summary.entries : [];
+            const tokenType = summary.filters?.token_type || 'total_tokens';
+            if (!entries.length) {
+                tokenUsageInsights.innerHTML = '<p style="margin:0;color:var(--muted);">No insights yet. Once the bot starts using models, usage trends will appear here.</p>';
+                return;
+            }
+
+            const topEntry = entries.reduce((best, entry) => {
+                const value = Number(entry.selected_token_total ?? entry.totals?.[tokenType] ?? 0);
+                if (!best) return { entry, value };
+                return value > best.value ? { entry, value } : best;
+            }, null);
+
+            const totalCalls = Number(summary.totals?.calls || 0);
+            const avgPerCall = totalCalls > 0 ? Math.round(Number(summary.selected_token_total ?? 0) / totalCalls) : 0;
+            const topLabel = topEntry
+                ? (summary.group_by === 'period'
+                    ? topEntry.entry.period
+                    : (topEntry.entry.model || topEntry.entry.provider || topEntry.entry.platform || topEntry.entry.period))
+                : 'n/a';
+
+            tokenUsageInsights.innerHTML =
+                '<p style="margin:0 0 8px;"><strong>Top consumer:</strong> ' + escapeHtml(String(topLabel)) + ' used ' + escapeHtml(formatNumber(topEntry ? topEntry.value : 0)) + ' ' + escapeHtml(formatTokenLabel(tokenType).toLowerCase()) + ' in this view.</p>' +
+                '<p style="margin:0 0 8px;"><strong>Average per call:</strong> ' + escapeHtml(formatNumber(avgPerCall)) + ' ' + escapeHtml(formatTokenLabel(tokenType).toLowerCase()) + ' across ' + escapeHtml(formatNumber(totalCalls)) + ' recorded calls.</p>' +
+                '<p style="margin:0;"><strong>Scope:</strong> grouped by ' + escapeHtml(String(summary.group_by || 'model')) + ' over ' + escapeHtml(String(summary.period || 'all')) + ' with ' + (summary.filters?.model ? 'model filter ' + escapeHtml(summary.filters.model) : 'all models') + '.</p>';
+        }
+
+        function renderTokenUsageTable(summary) {
+            const entries = Array.isArray(summary.entries) ? summary.entries : [];
+            const tokenType = summary.filters?.token_type || 'total_tokens';
+            if (!entries.length) {
+                tokenUsageTableWrap.innerHTML = '<p style="color:var(--muted);margin:0;">No token usage recorded yet.</p>';
+                return;
+            }
+
+            const rows = entries.map((entry) => (
+                '<tr>' +
+                    '<td style="padding:10px 12px;border-bottom:1px solid var(--line);">' + escapeHtml(String(entry.period || 'all')) + '</td>' +
+                    '<td style="padding:10px 12px;border-bottom:1px solid var(--line);">' + escapeHtml(String(entry.model || '-')) + '</td>' +
+                    '<td style="padding:10px 12px;border-bottom:1px solid var(--line);">' + escapeHtml(String(entry.provider || '-')) + '</td>' +
+                    '<td style="padding:10px 12px;border-bottom:1px solid var(--line);">' + escapeHtml(String(entry.platform || '-')) + '</td>' +
+                    '<td style="padding:10px 12px;border-bottom:1px solid var(--line);">' + escapeHtml(formatNumber(entry.totals?.calls || 0)) + '</td>' +
+                    '<td style="padding:10px 12px;border-bottom:1px solid var(--line);font-weight:700;">' + escapeHtml(formatNumber(entry.selected_token_total ?? entry.totals?.[tokenType] ?? 0)) + '</td>' +
+                '</tr>'
+            )).join('');
+
+            tokenUsageTableWrap.innerHTML =
+                '<div style="overflow:auto;">' +
+                    '<table style="width:100%;border-collapse:collapse;font-size:14px;">' +
+                        '<thead>' +
+                            '<tr style="text-align:left;background:var(--bg-soft);">' +
+                                '<th style="padding:10px 12px;border-bottom:1px solid var(--line);">Period</th>' +
+                                '<th style="padding:10px 12px;border-bottom:1px solid var(--line);">Model</th>' +
+                                '<th style="padding:10px 12px;border-bottom:1px solid var(--line);">Provider</th>' +
+                                '<th style="padding:10px 12px;border-bottom:1px solid var(--line);">Platform</th>' +
+                                '<th style="padding:10px 12px;border-bottom:1px solid var(--line);">Calls</th>' +
+                                '<th style="padding:10px 12px;border-bottom:1px solid var(--line);">' + escapeHtml(formatTokenLabel(tokenType)) + '</th>' +
+                            '</tr>' +
+                        '</thead>' +
+                        '<tbody>' + rows + '</tbody>' +
+                    '</table>' +
+                '</div>';
+        }
+
+        async function loadTokenUsageModels() {
+            if (tokenUsageModelsLoaded) return;
+            try {
+                const response = await fetch('/api/token-usage?period=all&groupBy=model', { cache: 'no-store' });
+                const summary = await response.json();
+                const models = Array.from(new Set((summary.entries || []).map((entry) => String(entry.model || '').trim()).filter(Boolean))).sort();
+                tokenUsageModelFilter.innerHTML = '<option value="">All Models</option>' + models.map((model) => '<option value="' + escapeHtml(model) + '">' + escapeHtml(model) + '</option>').join('');
+                tokenUsageModelsLoaded = true;
+            } catch (e) {}
+        }
+
+        async function loadTokenUsageDashboard() {
+            await loadTokenUsageModels();
+            tokenUsageChart.innerHTML = '<p style="color:var(--muted);margin:0;">Loading chart...</p>';
+            tokenUsageTrendChart.innerHTML = '<p style="color:var(--muted);margin:0;">Loading trend chart...</p>';
+            tokenUsageTableWrap.innerHTML = '<p style="color:var(--muted);margin:0;">Loading usage table...</p>';
+            try {
+                const comparisonParams = new URLSearchParams({
+                    period: tokenUsagePeriod.value,
+                    groupBy: 'model',
+                    tokenType: tokenUsageTokenType.value,
+                });
+                const tableParams = new URLSearchParams({
+                    period: tokenUsagePeriod.value,
+                    groupBy: 'model',
+                    tokenType: tokenUsageTokenType.value,
+                });
+                const trendPeriod = tokenUsagePeriod.value === 'all' ? 'month' : tokenUsagePeriod.value;
+                const trendParams = new URLSearchParams({
+                    period: trendPeriod,
+                    groupBy: 'model',
+                    tokenType: tokenUsageTokenType.value,
+                });
+                if (tokenUsageModelFilter.value) {
+                    comparisonParams.set('model', tokenUsageModelFilter.value);
+                    tableParams.set('model', tokenUsageModelFilter.value);
+                    trendParams.set('model', tokenUsageModelFilter.value);
+                }
+                const [comparisonResponse, tableResponse, trendResponse] = await Promise.all([
+                    fetch('/api/token-usage?' + comparisonParams.toString(), { cache: 'no-store' }),
+                    fetch('/api/token-usage?' + tableParams.toString(), { cache: 'no-store' }),
+                    fetch('/api/token-usage?' + trendParams.toString(), { cache: 'no-store' }),
+                ]);
+                const comparisonSummary = await comparisonResponse.json();
+                const tableSummary = await tableResponse.json();
+                const trendSummary = await trendResponse.json();
+                renderTokenUsageCards(comparisonSummary);
+                renderTokenUsageChart(comparisonSummary);
+                renderTokenUsageTrendChart(trendSummary);
+                renderTokenUsageInsights(tableSummary);
+                renderTokenUsageTable(tableSummary);
+            } catch (e) {
+                tokenUsageSummaryCards.innerHTML = '';
+                tokenUsageChart.innerHTML = '<p style="color:var(--danger);margin:0;">Failed to load token usage chart.</p>';
+                tokenUsageTrendChart.innerHTML = '<p style="color:var(--danger);margin:0;">Failed to load token usage trend chart.</p>';
+                tokenUsageInsights.innerHTML = '<p style="color:var(--danger);margin:0;">Failed to load token usage insights.</p>';
+                tokenUsageTableWrap.innerHTML = '<p style="color:var(--danger);margin:0;">Failed to load token usage table.</p>';
+            }
         }
 
         async function loadMdFile(filePath) {
@@ -2441,6 +2855,11 @@ const html = `<!DOCTYPE html>
         navBotLogs.addEventListener('click', async () => {
             setActiveView('bot');
             await loadBotLog();
+        });
+        navTokenUsage.addEventListener('click', async () => {
+            sidebarItems.forEach(b => b.classList.remove('active'));
+            navTokenUsage.classList.add('active');
+            setActiveView('token-usage');
         });
         navSettings.addEventListener('click', async () => {
             setActiveView('settings');
@@ -2799,6 +3218,28 @@ const html = `<!DOCTYPE html>
         historyLimitInput.addEventListener('change', () => saveSettings());
         defaultBotModelSelect.addEventListener('change', () => saveSettings());
         defaultImageModelSelect.addEventListener('change', () => saveSettings());
+        tokenUsagePeriod.addEventListener('change', () => loadTokenUsageDashboard());
+        tokenUsageGroupBy.addEventListener('change', () => loadTokenUsageDashboard());
+        tokenUsageTokenType.addEventListener('change', () => loadTokenUsageDashboard());
+        tokenUsageModelFilter.addEventListener('change', () => loadTokenUsageDashboard());
+        refreshTokenUsageBtn.addEventListener('click', () => loadTokenUsageDashboard());
+        clearTokenUsageBtn.addEventListener('click', async () => {
+            const ok = confirm('Clear all token usage history?');
+            if (!ok) return;
+            try {
+                const response = await fetch('/api/clear-token-usage');
+                const result = await response.json();
+                if (result.success) {
+                    tokenUsageModelsLoaded = false;
+                    await loadTokenUsageDashboard();
+                    alert('Token usage history cleared');
+                } else {
+                    alert('Failed to clear token usage history');
+                }
+            } catch (e) {
+                alert('Failed to clear token usage history');
+            }
+        });
 
         sidebarClearTmpBtn.addEventListener('click', async () => {
             const ok = confirm('Clear all files in tmp directory?');
@@ -2823,6 +3264,23 @@ const html = `<!DOCTYPE html>
                 else alert('Failed to clean heartbeat directory');
             } catch (e) {
                 alert('Failed to clean heartbeat directory');
+            }
+        });
+        sidebarClearTokenUsageBtn.addEventListener('click', async () => {
+            const ok = confirm('Clear all token usage history?');
+            if (!ok) return;
+            try {
+                const response = await fetch('/api/clear-token-usage');
+                const result = await response.json();
+                if (result.success) {
+                    tokenUsageModelsLoaded = false;
+                    if (activeView === 'token-usage') await loadTokenUsageDashboard();
+                    alert('Token usage history cleared');
+                } else {
+                    alert('Failed to clear token usage history');
+                }
+            } catch (e) {
+                alert('Failed to clear token usage history');
             }
         });
 
@@ -2936,6 +3394,24 @@ const server = http.createServer((req, res) => {
 
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ historyLimit, defaultBotModel, defaultImageModel, models, imageModels }));
+        return;
+    }
+
+    if (pathname === '/api/token-usage' && method === 'GET') {
+        try {
+            const period = String(requestUrl.searchParams.get('period') || 'all').toLowerCase();
+            const groupBy = String(requestUrl.searchParams.get('groupBy') || 'model').toLowerCase();
+            const model = requestUrl.searchParams.get('model') || '';
+            const provider = requestUrl.searchParams.get('provider') || '';
+            const platform = requestUrl.searchParams.get('platform') || '';
+            const tokenType = String(requestUrl.searchParams.get('tokenType') || '').toLowerCase();
+            const summary = getTokenUsageSummary({ period, groupBy, model, provider, platform, tokenType });
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify(summary));
+        } catch (e) {
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: false, error: e.message }));
+        }
         return;
     }
 
@@ -3247,6 +3723,18 @@ const server = http.createServer((req, res) => {
             res.writeHead(500, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ success: false, error: e.message }));
         });
+        return;
+    }
+
+    if (pathname === '/api/clear-token-usage' && method === 'GET') {
+        try {
+            clearTokenUsageHistory();
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: true }));
+        } catch (e) {
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: false, error: e.message }));
+        }
         return;
     }
 
