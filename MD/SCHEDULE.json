@@ -29,7 +29,7 @@
       "stop": "2026-03-22T10:55",
       "step_time": "0m",
       "prompt": "hello",
-      "status": "enabled",
+      "status": "expired",
       "next_run_time": "2026-03-22T10:55",
       "issuer_client": "onboard",
       "issuer_target": "dashboard"
