@@ -7,6 +7,12 @@ let client = null;
 let whatsappRuntimeStatus = 'initializing';
 const historyHandler = require('./historyHandler');
 
+function formatScheduleStatus(status) {
+    const raw = String(status || '').trim().toLowerCase();
+    if (!raw) return '-';
+    return raw.charAt(0).toUpperCase() + raw.slice(1);
+}
+
 function getWhatsappClient() {
     return client;
 }
@@ -40,6 +46,10 @@ function getWhatsAppStatus() {
     }
 
     return `WhatsApp status: ${String(info.status || 'unknown').toUpperCase()}.`;
+}
+
+function isWhatsAppReady() {
+    return whatsappRuntimeStatus === 'ready' && !!client;
 }
 
 /**
@@ -220,6 +230,10 @@ async function listCommands(msg) {
         `♻️ */reset model* — Reset model\n` +
         `👥 */list contacts [q]* — Search contacts\n` +
         `🖨️ */print* — Debug model vars\n` +
+        `📋 */list schedule* — View schedules\n` +
+        `🗑️ */delete schedule* — Clear all\n` +
+        `🗑️ */delete task <pid>* — Delete specific\n` +
+        `⏰ */schedule [start] [end] [step] [prompt]* — Add task\n` +
         `🛑 */stop* — Shut down`;
     await client.sendMessage(msg.to, reply);
 }
@@ -279,6 +293,58 @@ async function builtInCommands(msg) {
 
     if (cmd.startsWith('/list contacts')) {
         await listContacts(msg);
+        return true;
+    }
+
+    if (cmd === '/list schedule') {
+        const { getScheduledTasks } = require('./scheduleTool');
+        const tasks = getScheduledTasks();
+        if (!tasks || tasks.length === 0) {
+            await client.sendMessage(msg.to, "🐾 *No tasks scheduled.*");
+            return true;
+        }
+        let reply = "📋 *Scheduled Tasks:\n\n*";
+        tasks.forEach(t => {
+            reply += `*${t.pid}*\nStart: ${t.start}\nStop: ${t.stop}\nStep: ${t.step_time}\nStatus: ${formatScheduleStatus(t.status)}\nNext: ${t.next_run_time || '-'}\n\n`;
+        });
+        await client.sendMessage(msg.to, reply);
+        return true;
+    }
+
+    if (cmd === '/delete schedule') {
+        const { clearAllSchedules } = require('./scheduleTool');
+        const reply = clearAllSchedules();
+        await client.sendMessage(msg.to, reply);
+        return true;
+    }
+
+    if (cmd.startsWith('/delete task ')) {
+        const pid = msg.body.trim().slice('/delete task '.length).trim();
+        const { deleteSchedule } = require('./scheduleTool');
+        const reply = deleteSchedule(pid);
+        await client.sendMessage(msg.to, reply);
+        return true;
+    }
+
+    if (cmd.startsWith('/schedule ')) {
+        const parts = msg.body.trim().split(' ');
+        if (parts.length < 5) {
+            await client.sendMessage(msg.to, "🐾 *Format: /schedule [start] [end] [step] [prompt]*\nExample: `/schedule 09:00 17:00 30m Check servers`");
+            return true;
+    }
+        const start = parts[1];
+        const end = parts[2];
+        const step = parts[3];
+        const promptText = parts.slice(4).join(' ');
+        const timeExpr = step.toLowerCase() === 'once'
+            ? `once ${start}`
+            : `start ${start} end ${end} step ${step}`;
+        const { scheduleTask } = require('./scheduleTool');
+        const reply = scheduleTask(promptText, timeExpr, promptText, {
+            issuer_client: 'whatsapp',
+            issuer_target: msg.to
+        });
+        await client.sendMessage(msg.to, reply);
         return true;
     }
 
@@ -416,5 +482,6 @@ module.exports = {
     initializeWhatsAppClient,
     getWhatsappClient,
     getWhatsAppStatus,
+    isWhatsAppReady,
     MessageMedia,
 };

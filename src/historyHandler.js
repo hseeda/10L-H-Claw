@@ -8,7 +8,7 @@ const dotenv = require('dotenv');
 
 const envBotPath = path.join(__dirname, '..', 'secrets', '.env_bot');
 if (fs.existsSync(envBotPath)) {
-    dotenv.config({ path: envBotPath });
+    dotenv.config({ path: envBotPath, quiet: true });
 }
 
 // Stateful history storage for memory-based platforms

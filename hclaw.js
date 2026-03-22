@@ -34,11 +34,12 @@ require('dotenv').config({ path: envPath, quiet: true });
 
 const envBotPath = path.join(__dirname, 'secrets', '.env_bot');
 if (fs.existsSync(envBotPath)) {
-    require('dotenv').config({ path: envBotPath, override: true });
+    require('dotenv').config({ path: envBotPath, override: true, quiet: true });
 }
 console.log = oldLog;
-const { initializeWhatsAppClient } = require('./src/whatsappClient');
+const { initializeWhatsAppClient, isWhatsAppReady, getWhatsAppStatus } = require('./src/whatsappClient');
 const { initializeTelegramClient } = require('./src/telegramClient');
+const { loadScheduledTasks, getSchedulableTasks, markTaskExecuted, updateSchedule, computeFutureOccurrence } = require('./src/scheduleTool');
 const queueFile = path.join(__dirname, 'tmp', 'onboard_ui_queue.jsonl');
 const pidFile = path.join(__dirname, 'public', 'hclaw.pid');
 let queueReadOffset = 0;
@@ -64,7 +65,6 @@ if (defaultModel) {
     try {
         const { switchModelByNumber } = require('./src/Models');
         switchModelByNumber(parseInt(defaultModel, 10));
-        console.log(`🎯 Initial model set from .env_bot to #${defaultModel}`);
     } catch(e) {}
 }
 
@@ -73,13 +73,140 @@ if (defaultImageModel) {
     try {
         const { switchImageModelByNumber } = require('./src/Models');
         switchImageModelByNumber(parseInt(defaultImageModel, 10));
-        console.log(`🎨 Initial Image model set from .env_bot to #${defaultImageModel}`);
     } catch(e) {}
 }
 
 const whatsappClient = initializeWhatsAppClient();
 initializeTelegramClient(whatsappClient);
 initializeOnboardClient(whatsappClient);
+
+// On startup, immediately refresh persisted next_run_time/status from the current time.
+loadScheduledTasks(new Date());
+
+let schedulerInFlight = false;
+
+async function deliverScheduledReply(task, response) {
+    const platform = String(task.issuer_client || 'onboard').toLowerCase();
+    const target = String(task.issuer_target || '').trim();
+    const finalReply = response && response.startsWith('🐾') ? response : `🐾 ${response}`;
+
+    if (platform === 'whatsapp') {
+        const selfRecipient = whatsappClient?.info?.wid?._serialized || '';
+        const normalizedTarget = target && target.includes('@')
+            ? target
+            : (/^\d+$/.test(target) ? `${target}@c.us` : '');
+        const recipient = normalizedTarget || selfRecipient;
+        if (!isWhatsAppReady()) {
+            throw new Error(`WhatsApp client is not ready. ${getWhatsAppStatus()}`);
+        }
+        if (whatsappClient && recipient) {
+            await whatsappClient.sendMessage(recipient, finalReply);
+        }
+        return;
+    }
+
+    if (platform === 'telegram') {
+        const { getTelegramClient, isTelegramActive } = require('./src/telegramClient');
+        const telegramClient = getTelegramClient();
+        const recipient = /^-?\d+$/.test(target) ? target : process.env.TELEGRAM_CHAT_ID;
+        if (!recipient || !/^-?\d+$/.test(String(recipient))) {
+            throw new Error(`Telegram recipient is invalid. issuer_target="${target}" TELEGRAM_CHAT_ID="${process.env.TELEGRAM_CHAT_ID || ''}"`);
+        }
+        if (telegramClient && isTelegramActive() && recipient) {
+            await telegramClient.sendTelegramMessage(recipient, finalReply);
+        }
+        return;
+    }
+
+    const { appendBotLog } = require('./src/loggerTool');
+    const historyHandler = require('./src/historyHandler');
+    appendBotLog(finalReply);
+    historyHandler.appendHistory('onboard', null, 'assistant', finalReply);
+    console.log(`📤 [OB][SCHED] Reply: ${finalReply}`);
+}
+
+async function executeScheduledTask(task) {
+    const { appendBotLog, appendBotLogSeparator } = require('./src/loggerTool');
+    const historyHandler = require('./src/historyHandler');
+    const { generateAIResponse } = require('./src/aiHandler');
+    const issuer = String(task.issuer_client || 'onboard').toUpperCase();
+    const issuerIcon = task.issuer_client === 'whatsapp'
+        ? '💬'
+        : task.issuer_client === 'telegram'
+            ? '📨'
+            : '🖥️';
+    const prompt = String(task.prompt || '').trim();
+    if (!prompt) return;
+
+    appendBotLogSeparator();
+    appendBotLog(`⏰ ${issuerIcon} [Task ${task.pid}] ${prompt}`);
+    console.log(`⏰ [SCHED] Executing task ${task.pid} for ${issuer}`);
+
+    if (task.issuer_client === 'onboard') {
+        historyHandler.appendHistory('onboard', null, 'user', `[Scheduled ${task.pid}] ${prompt}`);
+    } else if (task.issuer_client === 'telegram' && task.issuer_target) {
+        historyHandler.appendHistory('telegram', String(task.issuer_target), `[Scheduled ${task.pid}] ${prompt}`, null);
+    }
+
+    const injectedHistory = task.issuer_client === 'telegram'
+        ? await historyHandler.getHistory('telegram', String(task.issuer_target || ''))
+        : task.issuer_client === 'onboard'
+            ? await historyHandler.getHistory('onboard')
+            : '';
+
+    const response = await generateAIResponse(prompt, false, whatsappClient, injectedHistory, task.issuer_client || 'onboard');
+    await deliverScheduledReply(task, response || 'Scheduled task completed.');
+}
+
+async function runSchedulerTick() {
+    if (schedulerInFlight) return;
+    schedulerInFlight = true;
+    try {
+        loadScheduledTasks(new Date());
+        const dueTasks = getSchedulableTasks(new Date());
+        for (const task of dueTasks) {
+            const updatedTask = markTaskExecuted(task.pid, new Date());
+            try {
+                await executeScheduledTask({ ...task, next_run_time: updatedTask.next_run_time, status: updatedTask.status });
+                updateSchedule(task.pid, {
+                    next_run_time: computeFutureOccurrence(updatedTask, new Date())
+                });
+            } catch (taskError) {
+                updateSchedule(task.pid, {
+                    next_run_time: task.next_run_time,
+                    status: task.status
+                });
+                throw taskError;
+            }
+        }
+    } catch (error) {
+        console.error('Scheduler tick failed:', error && error.stack ? error.stack : error);
+    } finally {
+        schedulerInFlight = false;
+    }
+}
+
+function getSchedulerDelayMs(now = new Date()) {
+    const currentSecond = now.getSeconds();
+    const currentMs = now.getMilliseconds();
+    const targetSecond = 2;
+    const secondsUntilTarget = currentSecond < targetSecond
+        ? (targetSecond - currentSecond)
+        : (62 - currentSecond);
+    return (secondsUntilTarget * 1000) - currentMs;
+}
+
+function startSchedulerPolling() {
+    const scheduleNextTick = () => {
+        const delayMs = getSchedulerDelayMs();
+        setTimeout(async () => {
+            await runSchedulerTick();
+            scheduleNextTick();
+        }, delayMs);
+    };
+
+    scheduleNextTick();
+}
 
 try {
     fs.mkdirSync(path.dirname(queueFile), { recursive: true });
@@ -278,6 +405,8 @@ async function processQueuedCommands() {
 setInterval(() => {
     processQueuedCommands();
 }, 700);
+
+startSchedulerPolling();
 
 // Handle graceful shutdown globally
 process.on('SIGINT', async () => {

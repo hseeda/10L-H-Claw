@@ -10,6 +10,12 @@ let highestMessageId = 0;
 let lastKnownUserName = "User";
 let globalWhatsappClient = null;
 
+function formatScheduleStatus(status) {
+    const raw = String(status || '').trim().toLowerCase();
+    if (!raw) return '-';
+    return raw.charAt(0).toUpperCase() + raw.slice(1);
+}
+
 function getLastKnownUserName() {
     return lastKnownUserName;
 }
@@ -120,7 +126,11 @@ const tgClient = {
                     console.warn('⚠️ Telegram Markdown parse error. Retrying as plaintext...');
                     return this.sendTelegramMessage(chatId, text, false);
                 }
-                throw new Error(data.description || 'Failed to send Telegram message');
+                const description = data.description || 'Failed to send Telegram message';
+                if (description.toLowerCase().includes('chat not found')) {
+                    throw new Error(`Telegram chat not found for chat_id ${chatId}`);
+                }
+                throw new Error(description);
             }
 
             // Track the sent message ID
@@ -332,6 +342,10 @@ async function listCommands(chatId) {
         `🎨 \`/switch image model #\` — Switch image model\n` +
         `🌀 \`/wipe\` — Wipe messages\n` +
         `🗑️ \`/wipe tmp\` — Clear tmp files\n` +
+        `📋 \`/list schedule\` — View schedules\n` +
+        `🗑️ \`/delete schedule\` — Clear all\n` +
+        `🗑️ \`/delete task <pid>\` — Delete specific\n` +
+        `⏰ \`/schedule [start] [end] [step] [prompt]\` — Add task\n` +
         `🛑 \`/stop\` — Shut down`;
     await tgClient.sendTelegramMessage(chatId, reply);
 }
@@ -423,6 +437,58 @@ async function builtInCommands(chatId, text) {
         const { wipeTmpDirectory } = require('./aiTools');
         const count = wipeTmpDirectory();
         await tgClient.sendTelegramMessage(chatId, `🐾 *Tmp Wipe complete!* Cleared ${count} files from \`./tmp\`.`);
+        return true;
+    }
+    
+    if (cmd === '/list schedule') {
+        const { getScheduledTasks } = require('./scheduleTool');
+        const tasks = getScheduledTasks();
+        if (!tasks || tasks.length === 0) {
+            await tgClient.sendTelegramMessage(chatId, "🐾 *No tasks scheduled.*");
+            return true;
+        }
+        let reply = "📋 *Scheduled Tasks:\n\n*";
+        tasks.forEach(t => {
+            reply += `*${t.pid}*\nStart: ${t.start}\nStop: ${t.stop}\nStep: ${t.step_time}\nStatus: ${formatScheduleStatus(t.status)}\nNext: ${t.next_run_time || '-'}\n\n`;
+        });
+        await tgClient.sendTelegramMessage(chatId, reply);
+        return true;
+    }
+
+    if (cmd === '/delete schedule') {
+        const { clearAllSchedules } = require('./scheduleTool');
+        const reply = clearAllSchedules();
+        await tgClient.sendTelegramMessage(chatId, reply);
+        return true;
+    }
+
+    if (cmd.startsWith('/delete task ')) {
+        const pid = text.trim().slice('/delete task '.length).trim();
+        const { deleteSchedule } = require('./scheduleTool');
+        const reply = deleteSchedule(pid);
+        await tgClient.sendTelegramMessage(chatId, reply);
+        return true;
+    }
+
+    if (cmd.startsWith('/schedule ')) {
+        const parts = text.trim().split(' ');
+        if (parts.length < 5) {
+            await tgClient.sendTelegramMessage(chatId, "🐾 *Format: /schedule [start] [end] [step] [prompt]*\nExample: `/schedule 09:00 17:00 30m Check servers`");
+            return true;
+    }
+        const start = parts[1];
+        const end = parts[2];
+        const step = parts[3];
+        const promptText = parts.slice(4).join(' ');
+        const timeExpr = step.toLowerCase() === 'once'
+            ? `once ${start}`
+            : `start ${start} end ${end} step ${step}`;
+        const { scheduleTask } = require('./scheduleTool');
+        const reply = scheduleTask(promptText, timeExpr, promptText, {
+            issuer_client: 'telegram',
+            issuer_target: String(chatId)
+        });
+        await tgClient.sendTelegramMessage(chatId, reply);
         return true;
     }
     if (cmd.startsWith('/switch image model ')) {
@@ -578,7 +644,7 @@ async function initializeTelegramClient(whatsappClient = null) {
                     }
 
                     const { generateAIResponse } = require('./aiHandler');
-                    const aiReply = await generateAIResponse(prompt, true, whatsappClient, historyText, 'telegram');
+                    const aiReply = await generateAIResponse(prompt, true, whatsappClient, historyText, `telegram:${chatId}`);
                     
                     let finalReply = aiReply;
                     if (!finalReply.startsWith('🐾')) finalReply = '🐾 ' + finalReply;
@@ -646,7 +712,7 @@ async function processIncomingTelegramMessage(chatId, text) {
         // Inject the last 10 prior messages; current message is passed separately as prompt.
         const historyText = await historyHandler.getHistory('telegram', chatId);
 
-        const aiReply = await generateAIResponse(text, true, globalWhatsappClient, historyText, 'telegram');
+        const aiReply = await generateAIResponse(text, true, globalWhatsappClient, historyText, `telegram:${chatId}`);
         
         let finalReply = aiReply;
         if (!finalReply.startsWith('🐾')) finalReply = '🐾 ' + finalReply;

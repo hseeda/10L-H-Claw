@@ -174,13 +174,14 @@ const customToolsSchema = [
   { name: "mail_get_message", description: "Get email details", parameters: P({ account_name: S("Account name"), uid: S("Message UID"), folder: S("Folder (default: INBOX)"), download_attachments: B("Download attachments") }, ["account_name", "uid"]) },
   { name: "mail_delete_message", description: "Delete email", parameters: P({ account_name: S("Account name"), uid: S("Message UID"), folder: S("Folder") }, ["account_name", "uid"]) },
   { name: "mail_move_message", description: "Move email", parameters: P({ account_name: S("Account name"), uid: S("Message UID"), target_folder: S("Destination folder"), source_folder: S("Source folder") }, ["account_name", "uid", "target_folder"]) },
-  { name: "telegram_send", description: "Send TG msg", parameters: P({ chat_id: S("c"), message: S("t") }, ["chat_id", "message"]) },
-  { name: "telegram_reply", description: "Reply TG msg", parameters: P({ chat_id: S("c"), message_id: I("m"), message: S("t") }, ["chat_id", "message_id", "message"]) },
+  { name: "telegram_send", description: "Send TG msg. If chat_id is omitted, use the current Telegram chat or the default TELEGRAM_CHAT_ID.", parameters: P({ chat_id: S("Optional Telegram chat id. Omit to use CURRENT_CHAT or default TELEGRAM_CHAT_ID"), message: S("t") }, ["message"]) },
+  { name: "telegram_reply", description: "Reply TG msg. If chat_id is omitted, use the current Telegram chat or the default TELEGRAM_CHAT_ID.", parameters: P({ chat_id: S("Optional Telegram chat id. Omit to use CURRENT_CHAT or default TELEGRAM_CHAT_ID"), message_id: I("m"), message: S("t") }, ["message_id", "message"]) },
   { name: "telegram_list_recent", description: "TG updates", parameters: P({ offset: I("o"), limit: I("n") }) },
-  { name: "telegram_delete", description: "Delete TG msg", parameters: P({ chat_id: S("c"), message_id: I("m") }, ["chat_id", "message_id"]) },
-  { name: "telegram_send_media", description: "Send TG media", parameters: P({ chat_id: S("c"), file_path: S("p"), caption: S("cap") }, ["chat_id", "file_path"]) },
-  { name: "telegram_read_media", description: "AI-read TG media", parameters: P({ chat_id: S("c"), message_id: I("m") }, ["chat_id", "message_id"]) },
+  { name: "telegram_delete", description: "Delete TG msg. If chat_id is omitted, use the current Telegram chat or the default TELEGRAM_CHAT_ID.", parameters: P({ chat_id: S("Optional Telegram chat id. Omit to use CURRENT_CHAT or default TELEGRAM_CHAT_ID"), message_id: I("m") }, ["message_id"]) },
+  { name: "telegram_send_media", description: "Send TG media. If chat_id is omitted, use the current Telegram chat or the default TELEGRAM_CHAT_ID.", parameters: P({ chat_id: S("Optional Telegram chat id. Omit to use CURRENT_CHAT or default TELEGRAM_CHAT_ID"), file_path: S("p"), caption: S("cap") }, ["file_path"]) },
+  { name: "telegram_read_media", description: "AI-read TG media. If chat_id is omitted, use the current Telegram chat or the default TELEGRAM_CHAT_ID.", parameters: P({ chat_id: S("Optional Telegram chat id. Omit to use CURRENT_CHAT or default TELEGRAM_CHAT_ID"), message_id: I("m") }, ["message_id"]) },
   { name: "read_local_media", description: "Read a local image, audio file, or document from disk for analysis", parameters: P({ file_path: S("Absolute or relative file path") }, ["file_path"]) },
+  { name: "schedule_task", description: "Save a schedule entry. Format: 'start HH:MM end HH:MM|forever step Xm|Xh'.", parameters: P({ task_description: S("Short task label"), time_expression: S("'start HH:MM end HH:MM|forever step Xm|Xh'"), prompt: S("Prompt to store with the schedule") }, ["task_description", "time_expression", "prompt"]) },
   { name: "server_stop", description: "Shutdown" },
 ];
 
@@ -258,8 +259,38 @@ function processTarget(target_id) {
   return target;
 }
 
+function parsePlatformContext(platform = 'whatsapp') {
+  const raw = String(platform || 'whatsapp');
+  if (!raw.includes(':')) {
+    return { platformName: raw, currentTarget: '' };
+  }
+  const [platformName, ...rest] = raw.split(':');
+  return {
+    platformName: platformName || 'whatsapp',
+    currentTarget: rest.join(':').trim(),
+  };
+}
+
+function resolveTelegramChatId(rawChatId, platform = 'telegram') {
+  const { currentTarget } = parsePlatformContext(platform);
+  const requested = String(rawChatId || '').trim();
+  if (!requested || /^current(_chat)?$/i.test(requested) || /^this(_chat)?$/i.test(requested)) {
+    return currentTarget || String(process.env.TELEGRAM_CHAT_ID || '').trim();
+  }
+  if (/^default(_chat)?$/i.test(requested) || /^telegram$/i.test(requested) || /^here$/i.test(requested)) {
+    return currentTarget || String(process.env.TELEGRAM_CHAT_ID || '').trim();
+  }
+  return requested;
+}
+
 async function executeTool(name, args, client = null, platform = 'whatsapp') {
   console.log(`🔧  Tool called: ${name} [${platform}]`);
+
+  // ─── SCHEDULE TOOLS ───
+  if (name === "schedule_task") {
+    const { scheduleTask } = require("./scheduleTool");
+    return scheduleTask(args.task_description, args.time_expression, args.task_description);
+  }
 
   // ─── SERVER TOOLS ───
   if (name === "server_stop") {
@@ -398,6 +429,8 @@ async function executeTool(name, args, client = null, platform = 'whatsapp') {
   // ─── WHATSAPP TEXT TOOLS ───
   if (name === "whatsapp_send") {
     if (!client) return `❌ No client.`;
+    const { isWhatsAppReady, getWhatsAppStatus } = require("./whatsappClient");
+    if (!isWhatsAppReady()) return `❌ WhatsApp client is not ready. ${getWhatsAppStatus()}`;
     try {
       const target = processTarget(args.target_id);
       const payload = args.message.startsWith("🐾")
@@ -412,6 +445,8 @@ async function executeTool(name, args, client = null, platform = 'whatsapp') {
 
   if (name === "whatsapp_reply") {
     if (!client) return `❌ No client.`;
+    const { isWhatsAppReady, getWhatsAppStatus } = require("./whatsappClient");
+    if (!isWhatsAppReady()) return `❌ WhatsApp client is not ready. ${getWhatsAppStatus()}`;
     try {
       const targetMessage = await client.getMessageById(args.message_id.trim());
       if (targetMessage) {
@@ -429,6 +464,8 @@ async function executeTool(name, args, client = null, platform = 'whatsapp') {
 
   if (name === "whatsapp_list_recent") {
     if (!client) return `❌ No client.`;
+    const { isWhatsAppReady, getWhatsAppStatus } = require("./whatsappClient");
+    if (!isWhatsAppReady()) return `❌ WhatsApp client is not ready. ${getWhatsAppStatus()}`;
     try {
       const target = processTarget(args.target_id);
       const chat = await client.getChatById(target);
@@ -904,12 +941,14 @@ FileUri: ${uploadResult.uri}`;
   if (name.startsWith("telegram_")) {
     const { getTelegramClient } = require("./telegramClient");
     const telegram = getTelegramClient();
+    const resolvedChatId = resolveTelegramChatId(args?.chat_id, platform);
 
     if (!telegram) return "❌ Telegram client not initialized.";
 
     if (name === "telegram_send") {
         try {
-          const data = await telegram.sendTelegramMessage(args.chat_id, args.message);
+          if (!resolvedChatId) return "❌ Telegram Error: current chat_id is unavailable.";
+          const data = await telegram.sendTelegramMessage(resolvedChatId, args.message);
           return `✅ Telegram sent. ID: ${data.result.message_id}`;
         } catch (e) {
           return `❌ Telegram Error: ${e.message}`;
@@ -918,7 +957,8 @@ FileUri: ${uploadResult.uri}`;
 
     if (name === "telegram_reply") {
         try {
-          const data = await telegram.sendTelegramMessage(args.chat_id, args.message, true, true, args.message_id);
+          if (!resolvedChatId) return "❌ Telegram Error: current chat_id is unavailable.";
+          const data = await telegram.sendTelegramMessage(resolvedChatId, args.message, true, true, args.message_id);
           return `✅ Telegram replied. ID: ${data.result.message_id}`;
         } catch (e) {
           return `❌ Telegram Error: ${e.message}`;
@@ -942,7 +982,8 @@ FileUri: ${uploadResult.uri}`;
 
     if (name === "telegram_delete") {
         try {
-          await telegram.deleteTelegramMessage(args.chat_id, args.message_id);
+          if (!resolvedChatId) return "❌ Telegram Error: current chat_id is unavailable.";
+          await telegram.deleteTelegramMessage(resolvedChatId, args.message_id);
           return `✅ Telegram deleted (ID: ${args.message_id}).`;
         } catch (e) {
           return `❌ Telegram Error: ${e.message}`;
@@ -951,7 +992,8 @@ FileUri: ${uploadResult.uri}`;
 
     if (name === "telegram_send_media") {
         try {
-            await telegram.sendTelegramMedia(args.chat_id, args.file_path, args.caption);
+            if (!resolvedChatId) return "❌ Telegram Error: current chat_id is unavailable.";
+            await telegram.sendTelegramMedia(resolvedChatId, args.file_path, args.caption);
             return `✅ Telegram media sent.`;
         } catch (e) {
             return `❌ Telegram Error: ${e.message}`;

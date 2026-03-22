@@ -15,6 +15,7 @@ const path = require('path');
 const memoryPath = path.join(__dirname, '..', 'MD', 'MEMORY.md');
 const toolsPath  = path.join(__dirname, '..', 'MD', 'TOOLS.md');
 const soulPath   = path.join(__dirname, '..', 'MD', 'SOUL.md');
+const heartbeatPath = path.join(__dirname, '..', 'MD', 'HEARTBEAT.md');
 
 const PLATFORM_PROMPTS = {
     whatsapp: "Platform: WhatsApp. Reply with text directly; use whatsapp_send/whatsapp_reply for other chats only.",
@@ -22,12 +23,43 @@ const PLATFORM_PROMPTS = {
     onboard: "Platform: OB Dashboard. System admin tools enabled."
 };
 
-function getSystemPrompt(platform = 'whatsapp') {
-  let prompt = (PLATFORM_PROMPTS[platform] || PLATFORM_PROMPTS.whatsapp) + "\n";
+function parsePlatformContext(platform = 'whatsapp') {
+  const raw = String(platform || 'whatsapp');
+  if (!raw.includes(':')) {
+    return { platformName: raw, currentTarget: '' };
+  }
+  const [platformName, ...rest] = raw.split(':');
+  return {
+    platformName: platformName || 'whatsapp',
+    currentTarget: rest.join(':').trim(),
+  };
+}
+
+function providerEmoji(provider) {
+  if (provider === 'gemini') return '💎';
+  if (provider === 'openai' || provider === 'chatgpt') return '🤖';
+  if (provider === 'anthropic' || provider === 'claude') return '🧠';
+  return '🤔';
+}
+
+function getSystemPrompt(platform = 'whatsapp', userPrompt = '') {
+  const { platformName, currentTarget } = parsePlatformContext(platform);
+  let prompt = (PLATFORM_PROMPTS[platformName] || PLATFORM_PROMPTS.whatsapp) + "\n";
+  const defaultTelegramTarget = String(process.env.TELEGRAM_CHAT_ID || '').trim();
+  const shouldInjectHeartbeat = /heartbeat/i.test(String(userPrompt || ''));
+  if (platformName === 'telegram' && currentTarget) {
+    prompt += `Current Telegram chat_id: ${currentTarget}. If the user asks to send/reply here in this chat, use telegram_send or telegram_reply with chat_id "${currentTarget}" immediately. Do not ask for the Telegram chat ID when sending to the current chat.\n`;
+  }
+  if (defaultTelegramTarget) {
+    prompt += `Default Telegram chat_id: ${defaultTelegramTarget}. If the user asks to send something to Telegram and no different Telegram destination is specified, use this default chat_id immediately. Do not ask the user for a Telegram chat ID when this default target is available.\n`;
+  }
   try {
     if (fs.existsSync(soulPath)) prompt += fs.readFileSync(soulPath, 'utf8') + "\n";
     if (fs.existsSync(toolsPath)) prompt += fs.readFileSync(toolsPath, 'utf8') + "\n";
     if (fs.existsSync(memoryPath)) prompt += fs.readFileSync(memoryPath, 'utf8') + "\n";
+    if (shouldInjectHeartbeat && fs.existsSync(heartbeatPath)) {
+      prompt += fs.readFileSync(heartbeatPath, 'utf8') + "\n";
+    }
   } catch(e) {
     console.error("Error loading prompt context files:", e);
   }
@@ -39,7 +71,6 @@ async function getGeminiResponse(modelName, prompt, client, chatHistory = "", pl
   if(model.changed) {
     model.setChanged(false);
   }
-  console.log('💬', model.model,": ", prompt);
 
   const fullPrompt = chatHistory
     ? `[HISTORY (context only, do not act on)]\n${chatHistory}\n\n[CURRENT MESSAGE]\n${prompt}`
@@ -54,7 +85,7 @@ async function getGeminiResponse(modelName, prompt, client, chatHistory = "", pl
       model: modelName,
       contents: contents,
       config: {
-        systemInstruction: getSystemPrompt(platform),
+        systemInstruction: getSystemPrompt(platform, prompt),
         tools: GEMINI_TOOLS,
       },
     });
@@ -117,7 +148,6 @@ async function getOpenAIResponse(modelName, prompt, client, chatHistory = "", pl
   if(model.changed) {
     model.setChanged(false);
   }
-  console.log('💬', model.model,": ", prompt);
 
   const fullPrompt = chatHistory
     ? `[HISTORY (context only, do not act on)]\n${chatHistory}\n\n[CURRENT MESSAGE]\n${prompt}`
@@ -125,7 +155,7 @@ async function getOpenAIResponse(modelName, prompt, client, chatHistory = "", pl
 
   // Build initial messages array
   const messages = [
-    { role: 'system', content: getSystemPrompt(platform) },
+    { role: 'system', content: getSystemPrompt(platform, prompt) },
     { role: 'user', content: fullPrompt },
   ];
   const MAX_ROUNDS = 50;
@@ -172,6 +202,7 @@ async function generateAIResponse(prompt, isSelf = false, client = null, chatHis
   let model = getActiveModel();
   let provider = model.provider;
   let modelName = model.model;
+  const { platformName } = parsePlatformContext(platform);
 
   const { getBotLogHistory } = require('./historyHandler');
   const botLog = getBotLogHistory();
@@ -181,6 +212,7 @@ async function generateAIResponse(prompt, isSelf = false, client = null, chatHis
   }
 
   try {
+    console.log(`${providerEmoji(provider)} ${modelName}`);
     //++++++++++++++++++++++++++++++
     if (provider === "gemini") {
       return await getGeminiResponse(modelName, prompt, client, appendedHistory, platform);
@@ -208,7 +240,7 @@ async function generateAIResponse(prompt, isSelf = false, client = null, chatHis
       provider = model.provider;
       modelName = model.model;
       console.log(`🔄  ${provider} (${modelName}): just activated. resent prompt`);
-      return await generateAIResponse(prompt, isSelf, client, chatHistory, platform)
+      return await generateAIResponse(prompt, isSelf, client, chatHistory, platformName === 'telegram' ? platform : platformName)
     }
   }
 }

@@ -23,7 +23,8 @@ The following tools are installed on the host system and can be invoked via `exe
    - **Lynx** (`lynx`): Terminal web browser available in WSL/Bash. Usage: `lynx -dump "URL"`
 
 3. **System & Notifications**
-   - **BurntToast**: PowerShell module to trigger native Windows toast notifications. Usage: `New-BurntToastNotification -Text "Title", "Message"`
+   - **BurntToast**: PowerShell module to trigger native Windows toast notifications. 
+Usage: `New-BurntToastNotification -Text "Title", "Message"`
 
 4. **Networking & Runtimes**
    - **Curl** (`curl`): Data transfer tool for web requests.
@@ -43,3 +44,26 @@ The following tools are installed on the host system and can be invoked via `exe
 - `yt-dlp`: Media downloader
 - `curl`: Web requests
 - `python`/`python3`, `node`: Runtimes
+
+## Weather Check Tool
+
+### Purpose
+Fetch current weather conditions for any city using a reliable API (Open-Meteo).
+
+### Command (Bash)
+curl "https://api.open-meteo.com/v1/forecast?latitude={LAT}&longitude={LON}&current_weather=true"
+
+### How to Use
+1. Convert city name to coordinates (via geocoding API if needed).
+2. Replace {LAT} and {LON} with the city's latitude and longitude.
+3. Parse `current_weather` fields:
+   - temperature
+   - windspeed
+   - winddirection
+   - weathercode
+   - time
+
+### Notes
+- Avoid wttr.in.
+- Prefer Open-Meteo (no API key required).
+- Always return temperature (°C), wind speed (km/h), wind direction, condition, and timestamp.

@@ -2,6 +2,7 @@ const http = require('http');
 const fs = require('fs');
 const { fork, exec, execFile } = require('child_process');
 const path = require('path');
+const { getScheduledTasks, getStoredScheduledTasks, createSchedule, updateSchedule, deleteSchedule } = require('./src/scheduleTool');
 const oldLog = console.log;
 console.log = () => {}; // Suppress dotenv tip/verbose output
 require('dotenv').config({ path: path.join('secrets', '.env'), quiet: true });
@@ -11,6 +12,13 @@ console.log = oldLog;
 const PORT = Number(process.env.PORT) || 3000;
 const logFile = path.join('logs', 'log.txt');
 const botLogFile = path.join('logs', 'bot_log.txt');
+
+function resolveIssuerTargetForClient(clientName) {
+    const normalized = String(clientName || '').trim().toLowerCase();
+    if (normalized === 'whatsapp') return '';
+    if (normalized === 'telegram') return '';
+    return 'dashboard';
+}
 const waLogFile = path.join('logs', 'wa_log.txt');
 const tgLogFile = path.join('logs', 'tg_log.txt');
 const obLogFile = path.join('logs', 'ob_log.txt');
@@ -18,7 +26,9 @@ const queueFile = path.join('tmp', 'onboard_ui_queue.jsonl');
 const tempDir = 'tmp';
 const botScriptPath = path.resolve(__dirname, 'hclaw.js');
 const isWindows = process.platform === 'win32';
-const LOG_FILEPATH_REGEX = String.raw`(?:[a-zA-Z]:\\[^\n\)\`\'\"]*?\.[a-zA-Z0-9]{1,10})|(?:(?<=^)|(?<=[^a-zA-Z0-9]))(/[^ \n\)\`\'\"]*?\.[a-zA-Z0-9]{1,10})\b|(?:\b|(?<=\s))([\w.-]+(?:[ ][\w.-]+)*(?:[\/\\][\w.-]+(?:[ ][\w.-]+)*)*\.[a-zA-Z0-9]{1,10})\b`;
+const LOG_FILEPATH_REGEX = String.raw`(?:[a-zA-Z]:\\[^\n\)\`\'\"]*?\.[a-zA-Z0-9]{1,10})|(?:(?<=^)|(?<=[^a-zA-Z0-9]))(\./[^ \n\)\`\'\"]*?\.[a-zA-Z0-9]{1,10})|(?:(?<=^)|(?<=[^a-zA-Z0-9]))(/[^ \n\)\`\'\"]*?\.[a-zA-Z0-9]{1,10})\b|(?:\b|(?<=\s))([\w.-]+(?:[ ][\w.-]+)*(?:[\/\\][\w.-]+(?:[ ][\w.-]+)*)*\.[a-zA-Z0-9]{1,10})\b`;
+const MAX_LOG_VIEW_LINES = 400;
+const MAX_LOG_VIEW_CHARS = 120000;
 let botProcess = null;
 let botPid = null;
 let startInFlight = false;
@@ -235,6 +245,11 @@ async function stopBot() {
     }
 }
 
+async function restartBot() {
+    await stopBot();
+    await startBot();
+}
+
 async function readSystemLog() {
     try {
         return await fs.promises.readFile(logFile, 'utf8');
@@ -363,6 +378,32 @@ async function buildFilteredLog(source) {
     await fs.promises.mkdir(path.dirname(targetFile), { recursive: true });
     await fs.promises.writeFile(targetFile, filteredContent, 'utf8');
     return filteredContent;
+}
+
+function trimLogForUi(content) {
+    const text = String(content || '');
+    if (!text) return '';
+
+    let trimmed = text;
+    let wasTrimmed = false;
+
+    if (trimmed.length > MAX_LOG_VIEW_CHARS) {
+        trimmed = trimmed.slice(-MAX_LOG_VIEW_CHARS);
+        const firstNewline = trimmed.indexOf('\n');
+        if (firstNewline !== -1) {
+            trimmed = trimmed.slice(firstNewline + 1);
+        }
+        wasTrimmed = true;
+    }
+
+    const lines = trimmed.split(/\r?\n/);
+    if (lines.length > MAX_LOG_VIEW_LINES) {
+        trimmed = lines.slice(-MAX_LOG_VIEW_LINES).join('\n');
+        wasTrimmed = true;
+    }
+
+    if (!wasTrimmed) return trimmed;
+    return `[UI] Showing the most recent ${MAX_LOG_VIEW_LINES} lines / ${MAX_LOG_VIEW_CHARS} characters.\n${trimmed}`;
 }
 
 function resolveWorkspaceFilePath(fileParam) {
@@ -680,11 +721,15 @@ const html = `<!DOCTYPE html>
         }
 
         .action-pill.start {
-            background: var(--success);
+            background: #22c55e;
         }
 
         .action-pill.stop {
-            background: var(--danger);
+            background: #ef4444;
+        }
+
+        .action-pill.restart {
+            background: #0ea5b7;
         }
 
         .action-pill:disabled,
@@ -703,12 +748,20 @@ const html = `<!DOCTYPE html>
         }
 
         .action-pill.start:disabled {
-            background: #2ea57f;
+            background: #4ade80;
+            opacity: 0.45;
             color: #fff;
         }
 
         .action-pill.stop:disabled {
-            background: #e3392a;
+            background: #fca5a5;
+            opacity: 0.45;
+            color: #fff;
+        }
+
+        .action-pill.restart:disabled {
+            background: #67e8f9;
+            opacity: 0.45;
             color: #fff;
         }
 
@@ -722,6 +775,10 @@ const html = `<!DOCTYPE html>
 
         .action-pill.stop:disabled:hover {
             background: #e3392a;
+        }
+
+        .action-pill.restart:disabled:hover {
+            background: #15b7cc;
         }
 
         .nav-item:disabled:hover {
@@ -817,7 +874,7 @@ const html = `<!DOCTYPE html>
             user-select: none;
             border-right: 1px solid var(--line);
             overflow-y: hidden;
-            min-width: 42px;
+            min-width: 60px;
         }
 
         .gutter-line {
@@ -1290,6 +1347,10 @@ const html = `<!DOCTYPE html>
                         <i class="fa-solid fa-sliders" aria-hidden="true"></i>
                         <span>Settings</span>
                     </button>
+                    <button class="nav-item" id="nav-schedule" type="button" data-sidebar-item>
+                        <i class="fa-solid fa-calendar-check" aria-hidden="true"></i>
+                        <span>Manage Tasks</span>
+                    </button>
                 </div>
             </section>
         </aside>
@@ -1313,6 +1374,10 @@ const html = `<!DOCTYPE html>
                     <button class="action-pill stop" id="stop-btn" type="button">
                         <i class="fa-solid fa-stop" aria-hidden="true"></i>
                         <span>Stop</span>
+                    </button>
+                    <button class="action-pill restart" id="restart-btn" type="button">
+                        <i class="fa-solid fa-rotate-right" aria-hidden="true"></i>
+                        <span>Restart</span>
                     </button>
                     <button class="status-pill" id="status-pill" type="button">Checking...</button>
                 </div>
@@ -1417,13 +1482,81 @@ const html = `<!DOCTYPE html>
                     </div>
                 </div>
             </section>
+
+            <section class="settings-pane" id="schedule-pane" aria-label="Scheduled Tasks">
+                <div class="settings-card" style="max-width:100%;">
+                    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+                        <h3 style="margin:0;">Scheduled Tasks</h3>
+                        <button id="add-task-btn" class="action-pill start" type="button">
+                            <i class="fa-solid fa-plus" aria-hidden="true"></i>
+                            <span>Add Task</span>
+                        </button>
+                    </div>
+                    <div id="schedule-table-wrap"><p style="color:var(--muted);margin:0;">Loading...</p></div>
+                </div>
+            </section>
         </main>
     </div>
+
+    <div id="schedule-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.48);z-index:2000;align-items:center;justify-content:center;">
+        <div id="schedule-modal-panel" style="background:var(--panel);border-radius:16px;padding:28px 32px;min-width:360px;max-width:520px;width:90%;box-shadow:0 8px 40px rgba(0,0,0,0.22);">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;">
+                <h3 id="sched-modal-title" style="margin:0;font-size:17px;font-weight:700;">Add Scheduled Task</h3>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:14px;">
+                <div>
+                    <label style="font-size:14px;font-weight:600;display:block;margin-bottom:4px;">Start</label>
+                    <input id="sched-start" type="datetime-local" step="60" style="width:100%;height:40px;border:1px solid var(--line-strong);border-radius:8px;padding:0 12px;font-size:14px;background:var(--bg);color:var(--text);box-sizing:border-box;">
+                </div>
+                <div>
+                    <label style="font-size:14px;font-weight:600;display:block;margin-bottom:4px;">Stop</label>
+                    <input id="sched-stop" type="datetime-local" step="60" style="width:100%;height:40px;border:1px solid var(--line-strong);border-radius:8px;padding:0 12px;font-size:14px;background:var(--bg);color:var(--text);box-sizing:border-box;">
+                </div>
+                <div>
+                    <label style="font-size:14px;font-weight:600;display:block;margin-bottom:4px;">Step Time</label>
+                    <input id="sched-step" type="text" inputmode="text" placeholder="30m, 30 m, 1h, or 1 h" style="width:100%;height:40px;border:1px solid var(--line-strong);border-radius:8px;padding:0 12px;font-size:14px;background:var(--bg);color:var(--text);box-sizing:border-box;">
+                </div>
+                <label style="display:flex;align-items:center;gap:10px;font-size:14px;font-weight:600;cursor:pointer;">
+                    <input id="sched-run-once" type="checkbox">
+                    <span>Run Once</span>
+                </label>
+                <div>
+                    <label style="font-size:14px;font-weight:600;display:block;margin-bottom:4px;">Status</label>
+                    <select id="sched-status" style="width:100%;height:40px;border:1px solid var(--line-strong);border-radius:8px;padding:0 12px;font-size:14px;background:var(--bg);color:var(--text);box-sizing:border-box;">
+                        <option value="enabled">Enabled</option>
+                        <option value="disabled">Disabled</option>
+                    </select>
+                </div>
+                <div>
+                    <label style="font-size:14px;font-weight:600;display:block;margin-bottom:4px;">Target Client</label>
+                    <select id="sched-issuer-client" style="width:100%;height:40px;border:1px solid var(--line-strong);border-radius:8px;padding:0 12px;font-size:14px;background:var(--bg);color:var(--text);box-sizing:border-box;">
+                        <option value="onboard">OnBoard</option>
+                        <option value="whatsapp">WhatsApp</option>
+                        <option value="telegram">Telegram</option>
+                    </select>
+                </div>
+                <div>
+                    <label style="font-size:14px;font-weight:600;display:block;margin-bottom:4px;">Next Run Time</label>
+                    <input id="sched-next-run" type="text" readonly style="width:100%;height:40px;border:1px solid var(--line-strong);border-radius:8px;padding:0 12px;font-size:14px;background:#f8fafc;color:var(--muted);box-sizing:border-box;">
+                </div>
+                <div>
+                    <label style="font-size:14px;font-weight:600;display:block;margin-bottom:4px;">Prompt</label>
+                    <textarea id="sched-prompt" rows="4" placeholder="What should the bot do at this time?" style="width:100%;border:1px solid var(--line-strong);border-radius:8px;padding:10px 12px;font-size:14px;background:var(--bg);color:var(--text);resize:vertical;box-sizing:border-box;font-family:inherit;"></textarea>
+                </div>
+            </div>
+            <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:22px;">
+                <button id="sched-cancel-btn" type="button" style="padding:9px 20px;border-radius:10px;border:1px solid var(--line-strong);background:var(--bg);color:var(--text);font-size:14px;cursor:pointer;">Cancel</button>
+                <button id="sched-save-btn" class="action-pill start" type="button" style="font-size:14px;padding:9px 22px;">Save Task</button>
+            </div>
+        </div>
+    </div>
+
     <div id="filepath-tooltip" style="display: none; position: absolute; background: #1e1e24; border: 1px solid #333; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.3); padding: 10px; z-index: 1000; max-width: 400px; max-height: 300px; overflow: auto; pointer-events: auto;" onmouseenter="clearTimeout(window.hideTooltipTimeout)" onmouseleave="window.hideFileTooltip && window.hideFileTooltip()"></div>
     <script>
         const sidebarItems = document.querySelectorAll('[data-sidebar-item]');
         const startBtn = document.getElementById('start-btn');
         const stopBtn = document.getElementById('stop-btn');
+        const restartBtn = document.getElementById('restart-btn');
         const sidebarStartBtn = document.getElementById('sidebar-start-btn');
         const sidebarStopBtn = document.getElementById('sidebar-stop-btn');
         const navWaLog = document.getElementById('nav-wa-log');
@@ -1437,6 +1570,7 @@ const html = `<!DOCTYPE html>
         const workspaceTitle = document.getElementById('workspace-title');
         const workspace = document.querySelector('.workspace');
         const settingsPane = document.getElementById('settings-pane');
+        const schedulePane = document.getElementById('schedule-pane');
         const systemLogPane = document.getElementById('system-log-pane');
         const botLogPane = document.getElementById('bot-log-pane');
         const systemChatLog = document.getElementById('system-chat-log');
@@ -1474,6 +1608,7 @@ const html = `<!DOCTYPE html>
         let composerHistoryIndex = -1;
         let composerDraft = '';
         let composerImagePayload = null;
+        const logPathRegex = new RegExp('${LOG_FILEPATH_REGEX.replace(/\\/g, "\\\\").replace(/\'/g, () => "\\\'")}', 'g');
 
         function escapeHtml(text) {
             if (!text) return '';
@@ -1502,15 +1637,51 @@ const html = `<!DOCTYPE html>
             return allowedExtensions.has(extension);
         }
 
+        function splitWrappedFilePath(rawMatch) {
+            const text = String(rawMatch || '');
+            const tick = String.fromCharCode(96);
+            const wrapperRegex = new RegExp("^(['\\\"" + tick + "])(.*)\\\\1$");
+            const wrapperMatch = text.match(wrapperRegex);
+            if (wrapperMatch) {
+                const candidate = wrapperMatch[2];
+                if (isLikelyWorkspaceFilePath(candidate.split('\\\\').join('/'))) {
+                    return {
+                        prefix: wrapperMatch[1],
+                        path: candidate,
+                        suffix: wrapperMatch[1]
+                    };
+                }
+            }
+
+            let start = 0;
+            let end = text.length;
+            const leadingChars = "([{";
+            const trailingChars = ".,:;!?)]}";
+
+            while (start < end && leadingChars.includes(text[start])) start += 1;
+            while (end > start && trailingChars.includes(text[end - 1])) end -= 1;
+
+            const candidate = text.slice(start, end);
+            if (!isLikelyWorkspaceFilePath(candidate.split('\\\\').join('/'))) {
+                return { prefix: '', path: text, suffix: '' };
+            }
+
+            return {
+                prefix: text.slice(0, start),
+                path: candidate,
+                suffix: text.slice(end)
+            };
+        }
+
         function formatTextAsHtml(text) {
             if (!text) return '';
-            const regex = new RegExp('${LOG_FILEPATH_REGEX.replace(/\\/g, "\\\\").replace(/\'/g, () => "\\\'")}', 'g');
             return text.split('\\n').map(function(line) {
                 const escaped = escapeHtml(line.replace(/\\r/g, ''));
-                const processed = escaped.replace(regex, (match) => {
-                    const norm = match.split('\\\\').join('/');
+                const processed = escaped.replace(logPathRegex, (match) => {
+                    const parts = splitWrappedFilePath(match);
+                    const norm = parts.path.split('\\\\').join('/');
                     if (!isLikelyWorkspaceFilePath(norm)) return match;
-                    return \`<span class="filepath-link" onclick="openFileInEditor('\${norm}')" onmouseenter="showFileTooltip(event, '\${norm}')" onmouseleave="hideFileTooltip()">\${match}</span>\`;
+                    return \`<span class="filepath-link" onclick="openFileInEditor('\${norm}')" onmouseenter="showFileTooltip(event, '\${norm}')" onmouseleave="hideFileTooltip()">\${parts.prefix}\${parts.path}\${parts.suffix}</span>\`;
                 });
                 return '<div class="log-line">' + processed + '</div>';
             }).join('');
@@ -1548,7 +1719,11 @@ const html = `<!DOCTYPE html>
                     } else if (data.isAudio) {
                         tooltip.innerHTML = \`<audio src="\${data.content}" controls style="width: 100%; min-width: 280px; margin-top: 5px;"></audio>\`;
                     } else {
-                        tooltip.innerHTML = \`<pre style="margin: 0; font-size: 11px; white-space: pre-wrap; color: #e4e4e7; font-family: Consolas, monospace;">\${escapeHtml(data.content.substring(0, 500))}\${data.content.length > 500 ? '...' : ''}</pre>\`;
+                        const previewText = data.wholePreview
+                            ? String(data.content || '')
+                            : String(data.content || '').substring(0, 500);
+                        const previewSuffix = !data.wholePreview && String(data.content || '').length > 500 ? '...' : '';
+                        tooltip.innerHTML = \`<pre style="margin: 0; font-size: 11px; white-space: pre-wrap; color: #e4e4e7; font-family: Consolas, monospace;">\${escapeHtml(previewText)}\${previewSuffix}</pre>\`;
                     }
                 } catch (e) {
                     tooltip.innerHTML = \`<div style="color: #ff4d4f; font-size: 12px;">Failed to load</div>\`;
@@ -1716,9 +1891,11 @@ const html = `<!DOCTYPE html>
         function setButtonsDisabled(running) {
             const disableStart = actionInFlight || running;
             const disableStop = actionInFlight || !running;
+            const disableRestart = actionInFlight || !running;
 
             startBtn.disabled = disableStart;
             stopBtn.disabled = disableStop;
+            restartBtn.disabled = disableRestart;
             sidebarStartBtn.disabled = disableStart;
             sidebarStopBtn.disabled = disableStop;
         }
@@ -1737,12 +1914,16 @@ const html = `<!DOCTYPE html>
                     : 'var(--muted)';
         }
 
+        let _botIsRunning = false;
+
         async function loadStatus() {
             try {
                 const response = await fetch('/api/status');
                 const data = await response.json();
+                _botIsRunning = Boolean(data.running);
                 setStatusPill(Boolean(data.running));
                 setButtonsDisabled(Boolean(data.running));
+                if (activeView === 'schedule') loadSchedules();
                 if (!sendInFlight) {
                     if (Boolean(data.running) && Boolean(data.connected)) {
                         setComposerStatus('H-Claw is running and attached to this UI session.', 'success');
@@ -1751,15 +1932,17 @@ const html = `<!DOCTYPE html>
                     }
                 }
             } catch (error) {
+                _botIsRunning = false;
                 statusPill.textContent = 'Unreachable';
                 statusPill.style.background = '#92400e';
+                if (activeView === 'schedule') loadSchedules();
             }
         }
 
         async function requestBotAction(action) {
             if (actionInFlight) return;
             actionInFlight = true;
-            setButtonsDisabled(action === 'stop');
+            setButtonsDisabled(_botIsRunning);
             try {
                 await fetch('/api/' + action);
             } finally {
@@ -1831,6 +2014,15 @@ const html = `<!DOCTYPE html>
                 return;
             }
 
+            if (activeView === 'schedule') {
+                workspaceTitle.textContent = 'Scheduled Tasks';
+                workspaceIcon.className = 'fa-solid fa-calendar-check';
+                cleanSystemLogBtn.style.display = 'none';
+                cleanBotLogBtn.style.display = 'none';
+                saveMdBtn.style.display = 'none';
+                return;
+            }
+
             const meta = getConversationMeta(activeConversationSource);
             workspaceTitle.textContent = meta.title;
             workspaceIcon.className = meta.icon;
@@ -1874,6 +2066,7 @@ const html = `<!DOCTYPE html>
         }
 
         async function loadSystemLog() {
+            if (activeView !== 'system') return;
             if (document.activeElement === systemChatLog) return;
 
             try {
@@ -1900,14 +2093,26 @@ const html = `<!DOCTYPE html>
             const showBot = view === 'bot';
             const showSettings = view === 'settings';
             const showEditor = view === 'editor';
-            workspace.classList.toggle('hidden', showSettings);
+            const showSchedule = view === 'schedule';
+            workspace.classList.toggle('hidden', showSettings || showSchedule);
             settingsPane.classList.toggle('visible', showSettings);
+            schedulePane.classList.toggle('visible', showSchedule);
             systemLogPane.classList.toggle('visible', !showBot && !showEditor);
             botLogPane.classList.toggle('visible', showBot);
             editorPane.classList.toggle('visible', showEditor);
             botLogPane.setAttribute('aria-hidden', String(!showBot));
             editorPane.setAttribute('aria-hidden', String(!showEditor));
             syncWorkspaceHeader();
+            if (showSchedule) { loadSchedules(); _schedRefreshStart(); } else { _schedRefreshStop(); }
+        }
+
+        let _schedRefreshTimer = null;
+        function _schedRefreshStart() {
+            _schedRefreshStop();
+            _schedRefreshTimer = setInterval(loadSchedules, 5000);
+        }
+        function _schedRefreshStop() {
+            if (_schedRefreshTimer) { clearInterval(_schedRefreshTimer); _schedRefreshTimer = null; }
         }
 
         async function loadMdFileList() {
@@ -2013,6 +2218,7 @@ const html = `<!DOCTYPE html>
         }
 
         async function loadBotLog() {
+            if (activeView !== 'bot') return;
             if (document.activeElement === botLogViewer) return;
 
             try {
@@ -2108,6 +2314,11 @@ const html = `<!DOCTYPE html>
             }
         }
 
+        function setComposerPlatform(platform) {
+            composerPlatform.value = platform;
+            composerPlatform.dispatchEvent(new Event('change'));
+        }
+
         sidebarItems.forEach((item) => {
             item.addEventListener('click', () => {
                 if (item.disabled) return;
@@ -2131,6 +2342,7 @@ const html = `<!DOCTYPE html>
 
         startBtn.addEventListener('click', () => requestBotAction('start'));
         stopBtn.addEventListener('click', () => requestBotAction('stop'));
+        restartBtn.addEventListener('click', () => requestBotAction('restart'));
         sidebarStartBtn.addEventListener('click', () => requestBotAction('start'));
         sidebarStopBtn.addEventListener('click', () => requestBotAction('stop'));
         navSystemChat.addEventListener('click', async () => {
@@ -2141,18 +2353,21 @@ const html = `<!DOCTYPE html>
         });
         navWaLog.addEventListener('click', async () => {
             activeConversationSource = 'wa';
+            setComposerPlatform('whatsapp');
             setActiveView('system');
             lastLogText = '';
             await loadSystemLog();
         });
         navTgLog.addEventListener('click', async () => {
             activeConversationSource = 'tg';
+            setComposerPlatform('telegram');
             setActiveView('system');
             lastLogText = '';
             await loadSystemLog();
         });
         navObLog.addEventListener('click', async () => {
             activeConversationSource = 'ob';
+            setComposerPlatform('onboard');
             setActiveView('system');
             lastLogText = '';
             await loadSystemLog();
@@ -2167,6 +2382,266 @@ const html = `<!DOCTYPE html>
                 await loadSettings();
             }
         });
+
+        // ── Schedule ─────────────────────────────────────────────────────────
+        const navSchedule = document.getElementById('nav-schedule');
+        const schedModal = document.getElementById('schedule-modal');
+        const schedModalPanel = document.getElementById('schedule-modal-panel');
+        const schedStartInput = document.getElementById('sched-start');
+        const schedStopInput = document.getElementById('sched-stop');
+        const schedStepInput = document.getElementById('sched-step');
+        const schedRunOnceInput = document.getElementById('sched-run-once');
+        const schedStatusInput = document.getElementById('sched-status');
+        const schedIssuerClientInput = document.getElementById('sched-issuer-client');
+        const schedNextRunInput = document.getElementById('sched-next-run');
+        const schedPromptInput = document.getElementById('sched-prompt');
+
+        navSchedule.addEventListener('click', () => {
+            sidebarItems.forEach(b => b.classList.remove('active'));
+            navSchedule.classList.add('active');
+            setActiveView('schedule');
+        });
+
+        let _editingTaskPid = null;
+        let _currentTasks = [];
+
+        function formatScheduleTimestamp(value) {
+            const date = new Date(value);
+            if (Number.isNaN(date.getTime())) return '—';
+            const year = date.getFullYear();
+            const month = String(date.getMonth() + 1).padStart(2, '0');
+            const day = String(date.getDate()).padStart(2, '0');
+            const hour = String(date.getHours()).padStart(2, '0');
+            const minute = String(date.getMinutes()).padStart(2, '0');
+            return year + '-' + month + '-' + day + ' ' + hour + ':' + minute;
+        }
+
+        function toDatetimeLocalValue(value) {
+            const date = new Date(value);
+            if (Number.isNaN(date.getTime())) return '';
+            const year = date.getFullYear();
+            const month = String(date.getMonth() + 1).padStart(2, '0');
+            const day = String(date.getDate()).padStart(2, '0');
+            const hour = String(date.getHours()).padStart(2, '0');
+            const minute = String(date.getMinutes()).padStart(2, '0');
+            return year + '-' + month + '-' + day + 'T' + hour + ':' + minute;
+        }
+
+        function computeNextRunDisplay(task) {
+            return formatScheduleTimestamp(task && task.next_run_time);
+        }
+
+        function formatScheduleStatus(status) {
+            const raw = String(status || '').trim().toLowerCase();
+            if (!raw) return '-';
+            return raw.charAt(0).toUpperCase() + raw.slice(1);
+        }
+
+        function getDisplayScheduleStatus(status) {
+            const raw = String(status || '').trim().toLowerCase();
+            if (!_botIsRunning && raw !== 'disabled' && raw !== 'expired') {
+                return 'paused';
+            }
+            return raw;
+        }
+
+        function getScheduleStatusColor(status) {
+            const display = getDisplayScheduleStatus(status);
+            if (display === 'enabled') return '#22c55e';
+            if (display === 'running') return '#f59e0b';
+            if (display === 'paused') return '#64748b';
+            return '#94a3b8';
+        }
+
+        function formatIssuerClient(value) {
+            const raw = String(value || '').trim().toLowerCase();
+            if (raw === 'whatsapp') return 'WhatsApp';
+            if (raw === 'telegram') return 'Telegram';
+            return 'OnBoard';
+        }
+
+        function normalizeScheduleStep(value) {
+            const raw = String(value || '')
+                .toLowerCase()
+                .replace(/[٠-٩]/g, (char) => String(char.charCodeAt(0) - 1632))
+                .replace(/[۰-۹]/g, (char) => String(char.charCodeAt(0) - 1776));
+            const compact = raw.replace(/[^0-9a-z]/g, '');
+            const match = compact.match(/^(\d+)(m|h)$/);
+            return match ? (match[1] + match[2]) : '';
+        }
+
+        function isRunOnceTask(task) {
+            return Boolean(task) && String(task.step_time || '').trim().toLowerCase() === '0m';
+        }
+
+        function syncRunOnceUi() {
+            const runOnce = Boolean(schedRunOnceInput.checked);
+            if (runOnce) {
+                if (schedStartInput.value) {
+                    schedStopInput.value = schedStartInput.value;
+                }
+                schedStepInput.value = '0m';
+            }
+            schedStopInput.disabled = runOnce;
+            schedStepInput.disabled = runOnce;
+            schedStopInput.style.opacity = runOnce ? '0.7' : '1';
+            schedStepInput.style.opacity = runOnce ? '0.7' : '1';
+        }
+
+        function openScheduleModal(task) {
+            _editingTaskPid = task ? task.pid : null;
+            document.getElementById('sched-modal-title').textContent = task ? 'Edit Scheduled Task' : 'Add Scheduled Task';
+            schedStartInput.value = task ? toDatetimeLocalValue(task.start) : '';
+            schedStopInput.value = task ? toDatetimeLocalValue(task.stop) : '';
+            schedStepInput.value = task ? String(task.step_time || '') : '';
+            schedRunOnceInput.checked = isRunOnceTask(task);
+            schedStatusInput.value = task && task.status === 'disabled' ? 'disabled' : 'enabled';
+            schedIssuerClientInput.value = task ? String(task.issuer_client || 'onboard') : 'onboard';
+            schedNextRunInput.value = task ? formatScheduleTimestamp(task.next_run_time) : '';
+            schedPromptInput.value = task ? String(task.prompt || '') : '';
+            syncRunOnceUi();
+            schedModal.style.display = 'flex';
+        }
+
+        function buildSchedulePayload() {
+            const normalizedStep = normalizeScheduleStep(schedStepInput.value);
+            const rawStep = String(schedStepInput.value || '').trim();
+            const runOnce = Boolean(schedRunOnceInput.checked);
+            schedStepInput.value = runOnce ? '0m' : (normalizedStep || rawStep);
+            if (runOnce && schedStartInput.value) {
+                schedStopInput.value = schedStartInput.value;
+            }
+            return {
+                start: schedStartInput.value.trim(),
+                stop: runOnce ? schedStartInput.value.trim() : schedStopInput.value.trim(),
+                step_time: runOnce ? '0m' : (normalizedStep || rawStep),
+                status: schedStatusInput.value,
+                issuer_client: schedIssuerClientInput.value,
+                prompt: schedPromptInput.value.trim()
+            };
+        }
+
+        async function loadSchedules() {
+            const wrap = document.getElementById('schedule-table-wrap');
+            try {
+                const res = await fetch('/api/schedules');
+                const tasks = await res.json();
+                _currentTasks = tasks;
+                if (!tasks.length) {
+                    wrap.innerHTML = '<p style="color:var(--muted);margin:0;">No tasks scheduled.</p>';
+                    return;
+                }
+                wrap.innerHTML = \`<table style="width:100%;border-collapse:collapse;font-size:13px;">
+                    <thead><tr style="background:var(--bg);text-align:left;">
+                        <th style="padding:8px 10px;border-bottom:1px solid var(--line);">PID</th>
+                        <th style="padding:8px 10px;border-bottom:1px solid var(--line);">Start</th>
+                        <th style="padding:8px 10px;border-bottom:1px solid var(--line);">Stop</th>
+                        <th style="padding:8px 10px;border-bottom:1px solid var(--line);">Step</th>
+                        <th style="padding:8px 10px;border-bottom:1px solid var(--line);">Next Run</th>
+                        <th style="padding:8px 10px;border-bottom:1px solid var(--line);">Target Client</th>
+                        <th style="padding:8px 10px;border-bottom:1px solid var(--line);">Status</th>
+                        <th style="padding:8px 10px;border-bottom:1px solid var(--line);">Actions</th>
+                    </tr></thead>
+                    <tbody>\${tasks.map(t => \`<tr>
+                        <td style="padding:8px 10px 2px;font-family:monospace;font-size:12px;">\${escapeHtml(String(t.pid || ''))}</td>
+                        <td style="padding:8px 10px 2px;font-family:monospace;font-size:12px;">\${computeNextRunDisplay({ next_run_time: t.start })}</td>
+                        <td style="padding:8px 10px 2px;font-family:monospace;font-size:12px;">\${computeNextRunDisplay({ next_run_time: t.stop })}</td>
+                        <td style="padding:8px 10px 2px;font-family:monospace;font-size:12px;">\${escapeHtml(String(t.step_time || '') === '0m' ? 'Run Once' : String(t.step_time || ''))}</td>
+                        <td style="padding:8px 10px 2px;font-family:monospace;font-size:12px;">\${computeNextRunDisplay(t)}</td>
+                        <td style="padding:8px 10px 2px;">\${escapeHtml(formatIssuerClient(t.issuer_client))}</td>
+                        <td style="padding:8px 10px 2px;">
+                            <span style="color:\${getScheduleStatusColor(t.status)};">\${escapeHtml(formatScheduleStatus(getDisplayScheduleStatus(t.status)))}</span>
+                        </td>
+                        <td style="padding:8px 10px 2px;white-space:nowrap;">
+                            <button onclick="editSchedTask('\${escapeHtml(String(t.pid || ''))}')" style="margin-right:6px;padding:3px 10px;border-radius:6px;border:1px solid var(--line-strong);cursor:pointer;font-size:12px;background:var(--bg);color:var(--text);">Edit</button>
+                            <button onclick="toggleSchedTask('\${escapeHtml(String(t.pid || ''))}','\${(t.status==='enabled' || t.status==='running')?'disabled':'enabled'}')" style="margin-right:6px;padding:3px 10px;border-radius:6px;border:1px solid var(--line-strong);cursor:pointer;font-size:12px;background:var(--bg);color:var(--text);">\${(t.status==='enabled' || t.status==='running')?'Disable':'Enable'}</button>
+                            <button onclick="deleteSchedTask('\${escapeHtml(String(t.pid || ''))}')" style="padding:3px 10px;border-radius:6px;border:1px solid #f87171;cursor:pointer;font-size:12px;background:#fff5f5;color:#dc2626;">Delete</button>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td colspan="8" style="padding:2px 10px 10px;border-bottom:1px solid var(--line);font-size:12px;color:var(--muted);"><b>prompt:</b> \${escapeHtml(t.prompt)}</td>
+                    </tr>\`).join('')}</tbody>
+                </table>\`;
+            } catch (e) {
+                wrap.innerHTML = '<p style="color:#ef4444;margin:0;">Failed to load schedules.</p>';
+            }
+        }
+
+        window.editSchedTask = function(pid) {
+            const t = _currentTasks.find(x => String(x.pid) === String(pid));
+            if (!t) return;
+            openScheduleModal(t);
+        };
+
+        window.deleteSchedTask = async function(pid) {
+            if (!confirm('Delete task ' + pid + '?')) return;
+            await fetch('/api/schedules/' + encodeURIComponent(pid), { method: 'DELETE' });
+            loadSchedules();
+        };
+
+        window.toggleSchedTask = async function(pid, newStatus) {
+            await fetch('/api/schedules/' + encodeURIComponent(pid), {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ status: newStatus })
+            });
+            loadSchedules();
+        };
+
+        document.getElementById('add-task-btn').addEventListener('click', () => {
+            openScheduleModal(null);
+        });
+
+        document.getElementById('sched-cancel-btn').addEventListener('click', () => {
+            schedModal.style.display = 'none';
+        });
+
+        ['mousedown', 'mouseup', 'click', 'pointerdown', 'pointerup'].forEach((eventName) => {
+            schedModalPanel.addEventListener(eventName, (event) => {
+                event.stopPropagation();
+            });
+        });
+
+        [schedStartInput, schedStopInput, schedStepInput, schedPromptInput, schedStatusInput, schedIssuerClientInput].forEach((field) => {
+            ['copy', 'cut', 'paste'].forEach((eventName) => {
+                field.addEventListener(eventName, (event) => {
+                    event.stopPropagation();
+                });
+            });
+        });
+
+        schedRunOnceInput.addEventListener('change', () => syncRunOnceUi());
+        schedStartInput.addEventListener('input', () => {
+            if (!schedRunOnceInput.checked) return;
+            schedStopInput.value = schedStartInput.value;
+        });
+
+        document.getElementById('sched-save-btn').addEventListener('click', async () => {
+            const payload = buildSchedulePayload();
+            if (!payload.start || !payload.stop || !payload.prompt || !String(payload.step_time || '').trim()) {
+                return alert('Start, stop, step time, and prompt are required.');
+            }
+            if (payload.step_time !== '0m' && new Date(payload.stop) <= new Date(payload.start)) {
+                return alert('Stop must be later than start.');
+            }
+            const url = _editingTaskPid !== null ? '/api/schedules/' + encodeURIComponent(_editingTaskPid) : '/api/schedules';
+            const method = _editingTaskPid !== null ? 'PUT' : 'POST';
+            const res = await fetch(url, {
+                method,
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            const data = await res.json();
+            if (data.success) {
+                _editingTaskPid = null;
+                schedModal.style.display = 'none';
+                loadSchedules();
+            } else {
+                alert(data.error || 'Failed to save task.');
+            }
+        });
+        // ── End Schedule ──────────────────────────────────────────────────────
+
         cleanSystemLogBtn.addEventListener('click', () => cleanLog('system'));
         cleanBotLogBtn.addEventListener('click', () => cleanLog('bot'));
         composerSendBtn.addEventListener('click', () => sendComposerMessage());
@@ -2303,13 +2778,21 @@ const server = http.createServer((req, res) => {
     const pathname = requestUrl.pathname;
 
     if (pathname === '/' && method === 'GET') {
-        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+        res.writeHead(200, {
+            'Content-Type': 'text/html; charset=utf-8',
+            'Cache-Control': 'no-store, no-cache, must-revalidate',
+            Pragma: 'no-cache',
+            Expires: '0'
+        });
         res.end(html);
         return;
     }
 
     if (pathname === '/api/status' && method === 'GET') {
-        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.writeHead(200, {
+            'Content-Type': 'application/json',
+            'Cache-Control': 'no-store, no-cache, must-revalidate'
+        });
         isBotRunning().then((running) => {
             res.end(JSON.stringify({
                 running,
@@ -2327,7 +2810,7 @@ const server = http.createServer((req, res) => {
 
         contentPromise.then((content) => {
             res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' });
-            res.end(content);
+            res.end(trimLogForUi(content));
         }).catch(() => {
             res.writeHead(500, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' });
             res.end('');
@@ -2338,7 +2821,7 @@ const server = http.createServer((req, res) => {
     if (pathname === '/api/bot-log' && method === 'GET') {
         readBotLog().then((content) => {
             res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' });
-            res.end(content);
+            res.end(trimLogForUi(content));
         }).catch(() => {
             res.writeHead(500, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' });
             res.end('');
@@ -2460,13 +2943,6 @@ const server = http.createServer((req, res) => {
                     image_path: imagePath,
                     history_limit: historyLimit
                 };
-
-                if (platform === 'onboard') {
-                    const ts = `${new Date().toISOString().split('T')[0]} ${new Date().toTimeString().split(' ')[0]}`;
-                    const summary = trimmedText || '(image only)';
-                    const logLine = `[${ts}] [OnBoard] User: ${summary}\n`;
-                    fs.appendFileSync(logFile, logLine);
-                }
 
                 if (botProcess && botProcess.connected) {
                     botProcess.send(sendPayload);
@@ -2625,6 +3101,7 @@ const server = http.createServer((req, res) => {
         const ext = path.extname(fullPath).toLowerCase();
         const isImage = ['.png', '.jpg', '.jpeg', '.webp', '.gif'].includes(ext);
         const isAudio = ['.mp3', '.wav', '.ogg', '.m4a'].includes(ext);
+        const wholePreview = String(fileParam || '').replace(/\\/g, '/').startsWith('heartbeat/');
         const promise = (isImage || isAudio) ? fs.promises.readFile(fullPath) : fs.promises.readFile(fullPath, 'utf8');
         
         promise.then(data => {
@@ -2633,14 +3110,14 @@ const server = http.createServer((req, res) => {
                 const base64 = data.toString('base64');
                 const mimeMap = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.gif': 'image/gif' };
                 const mime = mimeMap[ext] || 'image/png';
-                res.end(JSON.stringify({ success: true, isImage: true, isAudio: false, content: `data:${mime};base64,${base64}`, path: fileParam }));
+                res.end(JSON.stringify({ success: true, isImage: true, isAudio: false, wholePreview: false, content: `data:${mime};base64,${base64}`, path: fileParam }));
             } else if (isAudio) {
                 const base64 = data.toString('base64');
                 const mimeMap = { '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.ogg': 'audio/ogg', '.m4a': 'audio/mp4' };
                 const mime = mimeMap[ext] || 'audio/mpeg';
-                res.end(JSON.stringify({ success: true, isDirectory: false, isImage: false, isAudio: true, content: `data:${mime};base64,${base64}`, path: fileParam }));
+                res.end(JSON.stringify({ success: true, isDirectory: false, isImage: false, isAudio: true, wholePreview: false, content: `data:${mime};base64,${base64}`, path: fileParam }));
             } else {
-                res.end(JSON.stringify({ success: true, isDirectory: false, isImage: false, isAudio: false, content: data, path: fileParam }));
+                res.end(JSON.stringify({ success: true, isDirectory: false, isImage: false, isAudio: false, wholePreview, content: data, path: fileParam }));
             }
         }).catch(err => {
             res.writeHead(500, { 'Content-Type': 'application/json' });
@@ -2682,11 +3159,94 @@ const server = http.createServer((req, res) => {
         return;
     }
 
+    if (pathname === '/api/restart' && method === 'GET') {
+        restartBot();
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true }));
+        return;
+    }
+
     if (pathname === '/favicon.ico') {
         res.writeHead(204);
         res.end();
         return;
     }
+
+    // ── Schedule API ──────────────────────────────────────────────────────────
+    if (pathname === '/api/schedules' && method === 'GET') {
+        isBotRunning().then((running) => {
+            try {
+                res.writeHead(200, {
+                    'Content-Type': 'application/json',
+                    'Cache-Control': 'no-store, no-cache, must-revalidate'
+                });
+                const tasks = running ? getScheduledTasks() : getStoredScheduledTasks();
+                res.end(JSON.stringify(tasks));
+            } catch (e) {
+                res.writeHead(500, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify([]));
+            }
+        });
+        return;
+    }
+
+    if (pathname === '/api/schedules' && method === 'POST') {
+        let body = '';
+        req.on('data', chunk => body += chunk);
+        req.on('end', () => {
+            try {
+                const payload = JSON.parse(body || '{}');
+                const task = createSchedule({
+                    ...payload,
+                    issuer_client: payload.issuer_client || 'onboard',
+                    issuer_target: resolveIssuerTargetForClient(payload.issuer_client)
+                });
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ success: true, pid: task.pid, task }));
+            } catch (e) {
+                res.writeHead(400, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ success: false, error: e.message }));
+            }
+        });
+        return;
+    }
+
+    if (pathname.startsWith('/api/schedules/') && method === 'DELETE') {
+        const pid = decodeURIComponent(pathname.split('/').pop());
+        try {
+            deleteSchedule(pid);
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: true }));
+        } catch (e) {
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: false, error: e.message }));
+        }
+        return;
+    }
+
+    if (pathname.startsWith('/api/schedules/') && method === 'PUT') {
+        const pid = decodeURIComponent(pathname.split('/').pop());
+        let body = '';
+        req.on('data', chunk => body += chunk);
+        req.on('end', () => {
+            try {
+                const payload = JSON.parse(body || '{}');
+                const task = updateSchedule(pid, {
+                    ...payload,
+                    issuer_target: payload.issuer_client !== undefined
+                        ? resolveIssuerTargetForClient(payload.issuer_client)
+                        : undefined
+                });
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ success: true, task }));
+            } catch (e) {
+                res.writeHead(400, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ success: false, error: e.message }));
+            }
+        });
+        return;
+    }
+    // ── End Schedule API ──────────────────────────────────────────────────────
 
     res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
     res.end('Not Found');
