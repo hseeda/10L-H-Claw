@@ -27,12 +27,25 @@ const tempDir = 'tmp';
 const heartbeatDir = path.join(__dirname, 'heartbeat');
 const botScriptPath = path.resolve(__dirname, 'hclaw.js');
 const isWindows = process.platform === 'win32';
+const editableSecretFiles = [
+    { label: '.env', path: 'secrets/.env' },
+    { label: '.env.example', path: 'secrets/.env.example' },
+    { label: '.env_bot', path: 'secrets/.env_bot' },
+    { label: 'mail_accounts.json', path: 'secrets/mail_accounts.json' },
+    { label: 'mail_accounts.json.example', path: 'secrets/mail_accounts.json.example' },
+];
 const LOG_FILEPATH_REGEX = String.raw`(?:[a-zA-Z]:\\[^\n\)\`\'\"]*?\.[a-zA-Z0-9]{1,10})|(?:(?<=^)|(?<=[^a-zA-Z0-9]))(\./[^ \n\)\`\'\"]*?\.[a-zA-Z0-9]{1,10})|(?:(?<=^)|(?<=[^a-zA-Z0-9]))(/[^ \n\)\`\'\"]*?\.[a-zA-Z0-9]{1,10})\b|(?:\b|(?<=\s))([\w.-]+(?:[ ][\w.-]+)*(?:[\/\\][\w.-]+(?:[ ][\w.-]+)*)*\.[a-zA-Z0-9]{1,10})\b`;
 const MAX_LOG_VIEW_LINES = 400;
 const MAX_LOG_VIEW_CHARS = 120000;
 let botProcess = null;
 let botPid = null;
 let startInFlight = false;
+
+function isEditableFilePath(filePathParam) {
+    const filePath = String(filePathParam || '').trim().replace(/\\/g, '/');
+    if (filePath.startsWith('MD/')) return true;
+    return editableSecretFiles.some((file) => file.path === filePath);
+}
 
 function isPidAlive(pid) {
     if (!pid) return false;
@@ -1331,6 +1344,16 @@ const html = `<!DOCTYPE html>
                 </div>
             </section>
 
+            <section class="sidebar-section collapsed" aria-label="Secrets">
+                <button class="section-heading" type="button" data-section-toggle aria-expanded="false">
+                    <span>Secrets</span>
+                    <i class="fa-solid fa-chevron-down" aria-hidden="true"></i>
+                </button>
+                <div class="section-items" id="secret-file-list">
+                    <!-- filled dynamically -->
+                </div>
+            </section>
+
             <section class="sidebar-section" aria-label="Views">
                 <button class="section-heading" type="button" data-section-toggle aria-expanded="true">
                     <span>Views</span>
@@ -1603,6 +1626,7 @@ const html = `<!DOCTYPE html>
         const sidebarClearTmpBtn = document.getElementById('sidebar-clear-tmp-btn');
         const sidebarClearHeartbeatBtn = document.getElementById('sidebar-clear-heartbeat-btn');
         const mdFileList = document.getElementById('md-file-list');
+        const secretFileList = document.getElementById('secret-file-list');
         const saveMdBtn = document.getElementById('save-md-btn');
         const editorPane = document.getElementById('editor-pane');
         const editorTextarea = document.getElementById('editor-textarea');
@@ -2143,6 +2167,7 @@ const html = `<!DOCTYPE html>
                     btn.innerHTML = '<i class="fa-regular fa-file" aria-hidden="true"></i><span>' + file.label + '</span>';
                     btn.addEventListener('click', () => {
                         mdFileList.querySelectorAll('.nav-item').forEach(b => b.classList.remove('active'));
+                        secretFileList.querySelectorAll('.nav-item').forEach(b => b.classList.remove('active'));
                         sidebarItems.forEach(b => b.classList.remove('active'));
                         btn.classList.add('active');
                         activeMdFile = file.path;
@@ -2150,6 +2175,31 @@ const html = `<!DOCTYPE html>
                         loadMdFile(file.path);
                     });
                     mdFileList.appendChild(btn);
+                });
+            } catch (e) {}
+        }
+
+        async function loadSecretFileList() {
+            try {
+                const response = await fetch('/api/secret-files');
+                const files = await response.json();
+                secretFileList.innerHTML = '';
+                files.forEach(file => {
+                    const btn = document.createElement('button');
+                    btn.className = 'nav-item';
+                    btn.type = 'button';
+                    btn.setAttribute('data-sidebar-item', '');
+                    btn.innerHTML = '<i class="fa-solid fa-key" aria-hidden="true"></i><span>' + file.label + '</span>';
+                    btn.addEventListener('click', () => {
+                        secretFileList.querySelectorAll('.nav-item').forEach(b => b.classList.remove('active'));
+                        mdFileList.querySelectorAll('.nav-item').forEach(b => b.classList.remove('active'));
+                        sidebarItems.forEach(b => b.classList.remove('active'));
+                        btn.classList.add('active');
+                        activeMdFile = file.path;
+                        setActiveView('editor');
+                        loadMdFile(file.path);
+                    });
+                    secretFileList.appendChild(btn);
                 });
             } catch (e) {}
         }
@@ -2362,6 +2412,7 @@ const html = `<!DOCTYPE html>
         sidebarStopBtn.addEventListener('click', () => requestBotAction('stop'));
         navSystemChat.addEventListener('click', async () => {
             activeConversationSource = 'system';
+            setComposerPlatform('onboard');
             setActiveView('system');
             lastLogText = '';
             await loadSystemLog();
@@ -2792,6 +2843,7 @@ const html = `<!DOCTYPE html>
         updateComposerAttachmentUi();
         loadStatus();
         loadMdFileList();
+        loadSecretFileList();
         setActiveView('system');
         loadSystemLog();
         loadBotLog();
@@ -3037,9 +3089,23 @@ const server = http.createServer((req, res) => {
         return;
     }
 
+    if (pathname === '/api/secret-files' && method === 'GET') {
+        try {
+            const files = editableSecretFiles
+                .filter((file) => fs.existsSync(path.join(__dirname, file.path)))
+                .map((file) => ({ label: file.label, path: file.path }));
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify(files));
+        } catch (e) {
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify([]));
+        }
+        return;
+    }
+
     if (pathname === '/api/md-file' && method === 'GET') {
         const filePathParam = requestUrl.searchParams.get('path');
-        if (!filePathParam || !filePathParam.startsWith('MD/')) {
+        if (!filePathParam || !isEditableFilePath(filePathParam)) {
             res.writeHead(400, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ success: false, error: 'Invalid path' }));
             return;
@@ -3063,7 +3129,7 @@ const server = http.createServer((req, res) => {
                 const payload = JSON.parse(body || '{}');
                 const filePathParam = payload.path;
                 const content = payload.content;
-                if (!filePathParam || !filePathParam.startsWith('MD/')) {
+                if (!filePathParam || !isEditableFilePath(filePathParam)) {
                     res.writeHead(400, { 'Content-Type': 'application/json' });
                     res.end(JSON.stringify({ success: false, error: 'Invalid path' }));
                     return;

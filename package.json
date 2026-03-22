@@ -5,7 +5,9 @@
   "main": "hclaw.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "cli": "node hclaw-cli.js"
+    "cli": "node hclaw-cli.js",
+    "onboard": "node hclaw-onboard.js",
+    "start": "node hclaw.js"
   },
   "keywords": [],
   "author": "",

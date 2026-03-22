@@ -1,216 +1,419 @@
 <p align="center">
-  <img src="assets/logo.png" width="150" alt="H-Claw Logo">
+  <img src="assets/logo.png" width="132" alt="H-Claw logo">
 </p>
 
-# H-Claw: Multi-Platform AI Power-Suite
+<h1 align="center">H-Claw</h1>
 
-![H-Claw Banner](assets/banner.png)
+<p align="center">
+  A local-first multi-client AI workspace for WhatsApp, Telegram, OnBoard, schedules, memory, tools, and heartbeat automation.
+</p>
 
-**H-Claw** is a personal AI assistant that lives inside WhatsApp, Telegram, and the local OnBoard dashboard. Built with a "Note to Self" philosophy, it bridges messaging apps with AI models, persistent memory, scheduling, heartbeat automation, system-level tools, email management, and media generation from one workspace.
+<p align="center">
+  <img src="assets/banner.png" alt="H-Claw banner">
+</p>
 
----
+<p align="center">
+  <img src="https://img.shields.io/badge/Node.js-16%2B-3c873a?style=for-the-badge" alt="Node.js 16+">
+  <img src="https://img.shields.io/badge/Clients-WhatsApp%20%7C%20Telegram%20%7C%20OnBoard-1f6feb?style=for-the-badge" alt="Clients">
+  <img src="https://img.shields.io/badge/Storage-Local%20Files-f59e0b?style=for-the-badge" alt="Local files">
+  <img src="https://img.shields.io/badge/UI-Web%20Dashboard%20%2B%20CLI-8b5cf6?style=for-the-badge" alt="Dashboard and CLI">
+</p>
 
-## Architecture Overview
+## What H-Claw Is
+
+H-Claw is a personal AI operating layer that sits on top of your messaging channels and local workspace. It lets you:
+
+- talk to the bot from WhatsApp, Telegram, OnBoard web UI, or the CLI
+- route the same tool-using brain across different models
+- save persistent facts in `MD/MEMORY.md`
+- schedule prompts in `MD/SCHEDULE.json`
+- run a bounded heartbeat workflow using `MD/HEARTBEAT.md`
+- inspect logs, edit project files, and control the bot from `hclaw-onboard.js`
+
+The design is intentionally file-backed. State lives in readable local files instead of hidden databases.
+
+## Product Tour
+
+### Main Surfaces
+
+| Surface | Purpose | Best For |
+|---|---|---|
+| `hclaw.js` | main runtime and bot orchestration | day-to-day bot operation |
+| `hclaw-onboard.js` | browser dashboard for control, logs, editing, schedules | operations and admin work |
+| `hclaw-cli.js` | live terminal companion styled like a coding console | quick local control and monitoring |
+| WhatsApp client | primary chat surface | mobile-first personal usage |
+| Telegram client | secondary chat surface | fast bot-to-chat automation |
+
+### Feature Map
 
 ```mermaid
-graph TD
-    A["🚀 hclaw.js<br/><i>Entry Point</i>"] -->|"Loads .env & validates keys"| B["🟢 whatsappClient.js<br/><i>QR Auth · Self-chat only</i>"]
-    A -->|"Optional"| C["🔵 telegramClient.js<br/><i>Bot API · 3s polling</i>"]
-    A -->|"Loads schedules"| M["⏰ scheduleTool.js<br/><i>SCHEDULE.json runtime</i>"]
-
-    B -->|"User message"| D["🧠 aiHandler.js<br/><i>AI Response Engine</i>"]
-    C -->|"User message"| D
-    M -->|"Scheduled prompt injection"| D
-
-    D -->|"Loads context"| E["📄 MD Files<br/><i>SOUL · TOOLS · MEMORY</i>"]
-    D -->|"Selects model"| F["⚙️ Models.js<br/><i>Fallback chain · Model switching</i>"]
-    D -->|"Tool calls"| G["🔧 aiTools.js<br/><i>37 tools · executeTool()</i>"]
-
-    G --> H["💻 Shell<br/><i>Bash · PowerShell</i>"]
-    G --> I["📧 mailTools.js<br/><i>SMTP · IMAP</i>"]
-    G --> J["🎨 AI APIs<br/><i>Gemini · OpenAI · Whisper</i>"]
-    G --> K["📁 File System<br/><i>Read · Write · List</i>"]
-    G --> L["💬 Messaging<br/><i>WA Send · TG Send</i>"]
-
-    D -->|"Final reply"| B
-    D -->|"Final reply"| C
-
-    style A fill:#2d2d2d,stroke:#ff9800,color:#fff
-    style D fill:#1a237e,stroke:#42a5f5,color:#fff
-    style G fill:#1b5e20,stroke:#66bb6a,color:#fff
-    style E fill:#4a148c,stroke:#ab47bc,color:#fff
-    style F fill:#b71c1c,stroke:#ef5350,color:#fff
+mindmap
+  root((H-Claw))
+    Chat Clients
+      WhatsApp
+      Telegram
+      OnBoard
+      CLI
+    AI Layer
+      Gemini
+      OpenAI
+      Fallback chain
+      Tool calls
+    Persistent Context
+      SOUL.md
+      TOOLS.md
+      MEMORY.md
+      HEARTBEAT.md on trigger
+    Automation
+      Scheduler
+      Run once tasks
+      Recurring tasks
+      Heartbeat runs
+    Operations
+      Logs
+      File editor
+      Secret editor
+      Restart and stop
+      Tmp cleanup
+      Heartbeat cleanup
 ```
 
----
+## Architecture
 
-## Project Structure
+### Runtime Flow
 
+```mermaid
+flowchart LR
+    WA[WhatsApp] --> CORE[hclaw.js]
+    TG[Telegram] --> CORE
+    OB[OnBoard / CLI] --> CORE
+    SCHED[Scheduler] --> CORE
+
+    CORE --> AI[aiHandler.js]
+    AI --> CTX[SOUL.md + TOOLS.md + MEMORY.md]
+    AI --> HB[HEARTBEAT.md when prompt contains heartbeat]
+    AI --> TOOLS[aiTools.js]
+
+    TOOLS --> FS[Filesystem]
+    TOOLS --> MAIL[Mail tools]
+    TOOLS --> SHELL[Shell tools]
+    TOOLS --> MEDIA[Image / Audio APIs]
+    TOOLS --> SEND[WA / TG send tools]
+
+    AI --> REPLY[Client reply]
 ```
+
+### Component Diagram
+
+<p align="center">
+  <img src="assets/architecture.png" alt="H-Claw architecture diagram">
+</p>
+
+### Project Layout
+
+```text
 10L-H-Claw/
-├── hclaw.js                    # Entry point: loads .env, starts clients, handles shutdown
-├── hclaw-onboard.js            # OnBoard web dashboard, log viewer, editor, scheduler UI, bot controls
+├── hclaw.js
+├── hclaw-onboard.js
+├── hclaw-cli.js
 ├── src/
-│   ├── Models.js               # Model registry, fallback chain, image model config
-│   ├── aiHandler.js            # Gemini & OpenAI pipelines, tool-calling loop, token tracking
-│   ├── aiTools.js              # 37 tool schemas + executeTool() dispatcher
-│   ├── whatsappClient.js       # WhatsApp Web client, message listener, slash commands
-│   ├── telegramClient.js       # Telegram Bot API polling, cross-platform bridge
-│   ├── scheduleTool.js         # SCHEDULE.json load/save/runtime state helpers
-│   ├── mailTools.js            # SMTP/IMAP email management (nodemailer + imapflow)
-│   └── serverTools.js          # Graceful shutdown orchestration
+│   ├── aiHandler.js
+│   ├── aiTools.js
+│   ├── Models.js
+│   ├── whatsappClient.js
+│   ├── telegramClient.js
+│   ├── onboardClient.js
+│   ├── scheduleTool.js
+│   ├── loggerTool.js
+│   ├── mailTools.js
+│   └── ...
 ├── MD/
-│   ├── SOUL.md                 # Bot personality (injected every request)
-│   ├── TOOLS.md                # Learned recipes & workflows (injected every request)
-│   ├── MEMORY.md               # Persistent user facts (injected every request)
-│   ├── HEARTBEAT.md            # Special instructions injected only when prompt contains "heartbeat"
-│   ├── SCHEDULE.json           # Persistent scheduled task storage
-│   └── media/                  # Stored media referenced by MEMORY
-├── heartbeat/                  # Heartbeat outputs, summaries, analyses, generated artifacts
+│   ├── SOUL.md
+│   ├── TOOLS.md
+│   ├── MEMORY.md
+│   ├── HEARTBEAT.md
+│   └── SCHEDULE.json
+├── heartbeat/
+├── logs/
 ├── secrets/
-│   ├── .env                    # API keys & config (never committed)
-│   ├── .env.example            # Template for .env
-│   └── mail_accounts.json      # Email account credentials
-├── tmp/                        # Temporary files (generated images, downloads, audio)
-├── assets/                     # Logo, banner
-└── .wwebjs_auth/               # WhatsApp session persistence (auto-generated)
+├── assets/
+└── tmp/
 ```
 
----
+## Core Features
 
-## Key Features
+### 1. Multi-Client Conversation Layer
 
-### Multi-Model Intelligence
+H-Claw can receive prompts from multiple surfaces while keeping one operational brain.
 
-Seamlessly switch between **Google Gemini** and **OpenAI GPT** models. Models are configured as a fallback chain — if one fails, the next activates automatically.
+- WhatsApp is the most personal and chat-native surface
+- Telegram is useful for bot delivery, quick replies, and scheduled routing
+- OnBoard is the operations console with logs, editor, settings, and task management
+- CLI gives you a live terminal dashboard with local control commands and OnBoard-style input
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant Client as WA/TG/OB/CLI
+    participant Core as hclaw.js
+    participant AI as aiHandler.js
+    participant Tools as aiTools.js
+
+    User->>Client: send prompt
+    Client->>Core: normalized input
+    Core->>AI: prompt + context + history
+    AI->>Tools: optional tool calls
+    Tools-->>AI: results
+    AI-->>Core: final answer
+    Core-->>Client: reply
+```
+
+### 2. Model Routing and Fallbacks
+
+H-Claw supports multiple text and image models and can fail over between them.
+
+- text models are selected from `AI_FALLBACK_ORDER`
+- image models are selected from `IMAGE_GENERATION_ORDER`
+- the active model choice is visible and configurable through OnBoard
+- the runtime can switch or reset model selection without changing app code
+
+Example:
 
 ```env
 AI_FALLBACK_ORDER=gemini:gemini-3-flash-preview,gemini:gemini-3.1-pro-preview,chatgpt:gpt-4o
-```
-
-Image generation supports separate model ordering with multiple providers:
-
-```env
 IMAGE_GENERATION_ORDER=openai:dall-e-3;gemini:gemini-2.0-flash-preview-image-generation;imagen:imagen-3.0-generate-002
 ```
 
-### Persistent Memory
+### 3. Persistent Prompt Context
 
-H-Claw maintains a fact-based memory system in `MEMORY.md`, injected into every AI request.
+The bot is not driven by a single hardcoded system prompt. Instead, it composes a context layer from local markdown files.
 
-- **Auto-Learning**: The AI decides when to save important info from conversation
-- **On-Demand**: Tell the bot to "remember" or "forget" specific details
-- **Media Memory**: Save images/files with descriptions for future reference
-- **Management**: List, add, edit, remove, and clear facts via tools
+| File | Role |
+|---|---|
+| `MD/SOUL.md` | personality, style, identity |
+| `MD/TOOLS.md` | learned workflows and operating recipes |
+| `MD/MEMORY.md` | persistent remembered facts |
+| `MD/HEARTBEAT.md` | special bounded instructions for heartbeat-triggered prompts only |
 
-### Conversation Persistence
+Normal requests always use:
 
-Recent message history is automatically re-injected into the AI context:
+- `SOUL.md`
+- `TOOLS.md`
+- `MEMORY.md`
 
-- **WhatsApp**: Last 11 messages
-- **Telegram**: Last 20 messages per chat
+Heartbeat requests additionally inject:
 
-### 37 Built-in AI Tools
+- `HEARTBEAT.md` when the prompt contains `heartbeat` in any casing
 
-The AI can autonomously choose and chain tools based on your request:
+### 4. Memory System
 
-| Category | Tools | Capabilities |
-|----------|-------|-------------|
-| **Shell** | `execute_bash`, `execute_powershell` | Run system commands with 15s timeout |
-| **Memory** | `memory_list/add/add_media/remove/edit/clear` | Persistent fact management |
-| **Files** | `file_read/write/append/list` | Local filesystem access |
-| **WhatsApp** | `whatsapp_send/reply/list_recent/list_contacts/send_media/read_media/download_media` | Full WhatsApp control |
-| **Telegram** | `telegram_send/list_recent/delete/send_media/read_media` | Full Telegram control |
-| **Email** | `mail_add_account/list_accounts/send_email/list_folders/list_messages/list_messages_all/get_message/delete_message/move_message` | Multi-account SMTP/IMAP |
-| **Media** | `generate_image`, `generate_audio` | Image generation (DALL-E/Gemini/Imagen), TTS |
-| **System** | `tool_save`, `server_stop` | Save learned workflows, shutdown |
+Memory is file-backed and human-readable.
 
-### Media Analysis
+- facts are stored in `MD/MEMORY.md`
+- the AI can add, remove, edit, and clear memory via tools
+- memory can include media references and descriptions
+- because it is markdown, you can also review or edit it directly from OnBoard
 
-- **Images/Documents/PDFs**: Uploaded to Gemini File API for vision analysis. If the active model is OpenAI, Gemini acts as a proxy reader.
-- **Audio/Voice Notes**: Transcribed via OpenAI Whisper
+This makes memory auditable. You can inspect what the bot “knows” without digging through a database.
 
-### Dynamic Tool Discovery
+### 5. Tool Calling
 
-The bot can learn new capabilities during conversation and save them to `TOOLS.md` for future use. Ask it to create a script, validate it via shell, and persist the recipe.
+H-Claw exposes a broad local tool layer through `src/aiTools.js`.
 
-### Cross-Platform
+Tool categories include:
 
-- **WhatsApp** (primary): Full integration via `whatsapp-web.js` with QR auth
-- **Telegram** (secondary): Bot API polling with media support and cross-platform notifications
-- **OnBoard**: Local browser dashboard for operations, logs, direct prompting, schedule editing, and file preview
+- filesystem read/write/list operations
+- PowerShell and shell execution
+- WhatsApp actions
+- Telegram actions
+- mail account and message management
+- image generation
+- audio generation and transcription
+- memory management
+- server and workflow controls
 
-### Scheduling
+This means the bot can move beyond plain answering and actually act inside the local workspace.
 
-H-Claw includes a file-backed scheduler stored in `MD/SCHEDULE.json`.
+### 6. Scheduler
 
-- Tasks are saved as JSON with `pid`, `start`, `stop`, `step_time`, `prompt`, `status`, `next_run_time`, `issuer_client`, and `issuer_target`
-- `step_time` supports recurring intervals like `5m` and `1h`, plus `0m` for **Run Once**
-- On startup, the bot reloads `SCHEDULE.json`, refreshes `next_run_time`, and marks expired tasks
-- While the bot is running, the scheduler polls on a wall-clock boundary and executes due tasks by injecting the stored prompt back into the bot
-- Replies go back to the originating client (`whatsapp`, `telegram`, or `onboard`)
-- Tasks are never auto-deleted when they expire; they remain in `SCHEDULE.json` with an expired state
+Scheduling is powered by `MD/SCHEDULE.json` and runtime logic in `src/scheduleTool.js`.
 
-### Heartbeat
+Each task stores fields such as:
 
-H-Claw supports a special heartbeat workflow driven by `MD/HEARTBEAT.md`.
+- `pid`
+- `start`
+- `stop`
+- `step_time`
+- `prompt`
+- `status`
+- `next_run_time`
+- `issuer_client`
+- `issuer_target`
 
-- `HEARTBEAT.md` is **not** injected on every request
-- It is injected only when the incoming prompt contains the word `heartbeat` in any casing
-- Heartbeat jobs are intended to analyze `./logs/bot_log.txt` and files inside `./heartbeat`
-- Generated heartbeat output is written under the `heartbeat/` directory, typically using timestamped folders and concise `summary.txt` files
-- This keeps heartbeat behavior isolated from normal chat requests
+#### Scheduler Behavior
 
-### Management Dashboard (OnBoard)
+- on bot startup, schedules are loaded and normalized against current time
+- expired tasks are marked instead of deleted
+- enabled tasks are polled on the wall clock
+- when a task becomes due, the scheduler updates `next_run_time` and injects the prompt back into the bot
+- replies are routed back to the task’s originating client
 
-`hclaw-onboard.js` starts the local OnBoard dashboard at `http://localhost:3000`.
+#### Run Once
 
-It acts as a control room for the whole bot:
+Run-once tasks are represented as:
 
-- **Bot lifecycle control**: Start, stop, and restart the main `hclaw.js` bot process
-- **Unified logs**: View system log, bot log, WhatsApp log, Telegram log, and OnBoard activity from one UI
-- **Direct prompting**: Send prompts from the dashboard to WhatsApp, Telegram, or OnBoard flows
-- **Schedule management**: Create, edit, enable, disable, and delete tasks stored in `MD/SCHEDULE.json`
-- **Task status visibility**: See `Enabled`, `Disabled`, `Running`, `Expired`, and UI-only `Paused` when the bot is offline
-- **Workspace file browsing**: Open and preview repo files, logs, generated heartbeat artifacts, and images/audio from the dashboard
-- **Markdown/text editing**: Edit supported workspace files directly in the browser
-- **Temporary file maintenance**: Clear `tmp/` from the UI
+- `stop = start`
+- `step_time = 0m`
 
----
+#### Scheduling Lifecycle
 
-## Slash Commands
+```mermaid
+flowchart TD
+    A[Load SCHEDULE.json] --> B{Task enabled?}
+    B -- No --> X[Keep as disabled]
+    B -- Yes --> C{Expired?}
+    C -- Yes --> Y[Mark expired]
+    C -- No --> D[Compute next_run_time]
+    D --> E{Due now or past?}
+    E -- No --> F[Wait for next poll]
+    E -- Yes --> G[Advance next_run_time]
+    G --> H[Inject task prompt into bot]
+    H --> I[Send reply to issuer client]
+```
 
-Processed locally without AI inference:
+### 7. Heartbeat Workflow
 
-| Command | Description |
-|---------|-------------|
-| `/help` | Show command menu |
-| `/wipe` | Delete bot messages from past 24h |
-| `/wipe tmp` | Clear temporary files directory |
-| `/list models` | Show all available AI models |
-| `/current model` | Display active model |
-| `/switch model <n>` | Switch AI model by index |
-| `/switch image model <n>` | Switch image generation model |
-| `/reset model` | Reset to default model |
-| `/list contacts [query]` | Search WhatsApp contacts |
-| `/list schedule` | Show saved scheduled tasks |
-| `/schedule ...` | Create a scheduled task from chat |
-| `/delete task <pid>` | Delete a scheduled task |
-| `/delete schedule` | Remove all scheduled tasks |
-| `/stop` | Graceful shutdown |
+Heartbeat is a deliberate, bounded automation mode rather than a normal chat feature.
 
----
+It is controlled by `MD/HEARTBEAT.md` and is intended to:
 
-## Installation & Setup
+- analyze `logs/bot_log.txt`
+- work inside the `heartbeat/` directory
+- generate summaries, audits, helper scripts, and reports there
+- avoid broad wandering into unrelated directories when heartbeat constraints say not to
+
+Typical heartbeat output pattern:
+
+```text
+heartbeat/
+└── YYYY-MM-DD_HHMM/
+    ├── summary.txt
+    ├── analysis_*.txt
+    ├── audit_*.txt
+    └── helper_*.js
+```
+
+Heartbeat is especially useful for:
+
+- periodic self-review
+- operations summaries
+- log trend analysis
+- bounded proactive maintenance artifacts
+
+### 8. OnBoard Dashboard
+
+`hclaw-onboard.js` is the operations center for H-Claw.
+
+#### What it does
+
+- starts, stops, and restarts the bot
+- shows system, bot, WhatsApp, Telegram, and OnBoard logs
+- lets you send prompts from the web UI
+- switches input routing when you change sidebar conversation views
+- manages schedules visually
+- edits documents and approved secret files
+- previews workspace files, including heartbeat artifacts
+- cleans `tmp/` and heartbeat output directories
+
+#### Why it matters
+
+Without OnBoard, H-Claw is a capable bot runtime.
+
+With OnBoard, H-Claw becomes a manageable local AI workstation.
+
+#### OnBoard View Map
+
+```mermaid
+graph TD
+    A[OnBoard Sidebar] --> B[Views]
+    A --> C[Documents]
+    A --> D[Secrets]
+    A --> E[Actions]
+
+    B --> B1[System Chat]
+    B --> B2[WhatsApp]
+    B --> B3[Telegram]
+    B --> B4[OnBoard]
+    B --> B5[Bot Logs]
+    B --> B6[Settings]
+    B --> B7[Manage Tasks]
+
+    E --> E1[Start Bot]
+    E --> E2[Stop Bot]
+    E --> E3[Clear Tmp]
+    E --> E4[Clean Heartbeat]
+```
+
+### 9. CLI Companion
+
+`hclaw-cli.js` mirrors the operational feel of OnBoard inside a terminal.
+
+It gives you:
+
+- live log viewing
+- direct OnBoard-style text input
+- local `:` commands for control
+- fast return to log view from command panes
+- a terminal workflow for users who prefer keyboard-first operation
+
+## Feature Deep Dive
+
+### Messaging Behavior
+
+- bot output is normalized to start with `🐾`
+- scheduled injections are logged distinctly
+- replies are pushed back to the right client when possible
+- Telegram and WhatsApp defaults are handled carefully to avoid ambiguous target routing
+
+### Logging
+
+H-Claw keeps separate logs for different layers:
+
+| Log | Purpose |
+|---|---|
+| `logs/log.txt` | system/runtime log |
+| `logs/bot_log.txt` | bot prompt/reply oriented log |
+| `logs/wa_log.txt` | WhatsApp client activity |
+| `logs/tg_log.txt` | Telegram client activity |
+| `logs/ob_log.txt` | OnBoard events |
+
+Operationally, this separation helps when debugging:
+
+- client connectivity
+- scheduler execution
+- model/tool behavior
+- heartbeat activity
+
+### Safe File Visibility
+
+The dashboard distinguishes between:
+
+- documents
+- secrets
+- generated heartbeat artifacts
+
+That separation helps keep editing intentional while still making important files accessible.
+
+## Setup
 
 ### Prerequisites
 
-- [Node.js](https://nodejs.org/) v16+
-- A WhatsApp account
-- At least one API key: Google Gemini or OpenAI
-- (Optional) Telegram Bot Token & Chat ID
+- Node.js 16+
+- at least one AI provider key
+- WhatsApp account for `whatsapp-web.js`
+- optional Telegram bot token and chat ID
 
-### 1. Clone & Install
+### Install
 
 ```bash
 git clone https://github.com/hseeda/10L-H-Claw.git
@@ -218,104 +421,143 @@ cd 10L-H-Claw
 npm install
 ```
 
-### 2. Configure Environment
+### Configure Environment
+
+Copy and edit:
 
 ```bash
 cp secrets/.env.example secrets/.env
 ```
 
-Edit `secrets/.env`:
+Common variables:
 
 ```env
-GEMINI_API_KEY=your_gemini_key
-OPENAI_API_KEY=your_openai_key
+GEMINI_API_KEY=...
+OPENAI_API_KEY=...
 AI_FALLBACK_ORDER=gemini:gemini-3-flash-preview,chatgpt:gpt-4o
-
-# Optional
-IMAGE_GENERATION_ORDER=openai:dall-e-3;gemini:imagen-3
-TELEGRAM_BOT_TOKEN=your_bot_token
-TELEGRAM_CHAT_ID=your_chat_id
+IMAGE_GENERATION_ORDER=openai:dall-e-3;gemini:gemini-2.0-flash-preview-image-generation
+TELEGRAM_BOT_TOKEN=...
+TELEGRAM_CHAT_ID=...
 ```
 
-### 3. WhatsApp Setup
+### Run the Main Bot
 
 ```bash
 node hclaw.js
 ```
 
-1. A QR code appears in the terminal
-2. Open WhatsApp → **Linked Devices** → **Link a Device**
-3. Scan the QR code — the bot is live
-
-### 4. Telegram Setup (Optional)
-
-1. Message [@BotFather](https://t.me/botfather) to create a bot and get your token
-2. Message [@userinfobot](https://t.me/userinfobot) to get your chat ID
-3. Add both to your `.env` file
-
-### 5. Email Setup (Optional)
-
-### 6. Scheduling
-
-Scheduling is file-backed. The bot creates and updates `MD/SCHEDULE.json` automatically, and the same file is editable from OnBoard.
-
-- Use chat commands such as `/schedule ...`
-- Or manage tasks visually from OnBoard
-- Keep the bot running if you want `next_run_time` and runtime task states to keep advancing automatically
-
-### 7. Heartbeat Workflow
-
-Heartbeat behavior is controlled by `MD/HEARTBEAT.md`.
-
-- Trigger heartbeat requests by including `heartbeat` in the prompt
-- Heartbeat runs are expected to work only within `./logs/bot_log.txt` and `./heartbeat`
-- Generated reports, summaries, and helper artifacts should stay inside `./heartbeat`
-
-### 8. Management Dashboard (Optional)
-
-Run the onboard dashboard to manage the bot from a web interface:
+### Run OnBoard
 
 ```bash
 node hclaw-onboard.js
 ```
 
-Access the dashboard at `http://localhost:3000`.
+Then open:
 
-> **Warning**: Never commit `.env` or `mail_accounts.json`. They are in `.gitignore` by default.
+```text
+http://localhost:3000
+```
 
----
+### Run the CLI
 
-## Technology Stack
+```bash
+npm run cli
+```
 
-| Component | Library | Purpose |
-|-----------|---------|---------|
-| WhatsApp | whatsapp-web.js | Web protocol via Puppeteer |
-| Telegram | Native Bot API (fetch) | HTTP long-polling |
-| Gemini AI | @google/genai | Text, vision, image generation, tool calling |
-| OpenAI | openai | GPT models, DALL-E, Whisper, TTS |
-| Email | nodemailer, imapflow | SMTP send, IMAP read/manage |
-| Shell | child_process | Bash & PowerShell execution |
-| Config | dotenv | Environment variables |
+## Common Workflows
 
----
+### Use H-Claw as a Personal Chat Agent
 
-## Privacy & Security
+1. Start the bot.
+2. Link WhatsApp or enable Telegram.
+3. Send prompts from your preferred client.
+4. Let the bot use tools when needed.
 
-- **Self-chat only**: H-Claw only responds in your own chat — never initiates external messages unless explicitly instructed
-- **Local session**: WhatsApp auth stored locally in `.wwebjs_auth/`
-- **No cloud storage**: Memory, tools, and soul files live on your machine
-- **Token tracking**: Cumulative token usage logged to console for billing awareness
+### Manage Schedules Visually
 
----
+1. Open OnBoard.
+2. Go to `Manage Tasks`.
+3. Add or edit tasks.
+4. Keep the bot running so runtime statuses and `next_run_time` keep moving.
 
-## Roadmap
+### Run a Heartbeat
 
-- [x] **Management Dashboard (OnBoard)**: Bot monitoring & control interface
-- **Persona Switching**: Dynamic personality modes via expanded SOUL.md configuration
+1. Ensure `MD/HEARTBEAT.md` has the workflow you want.
+2. Send a prompt containing `heartbeat`.
+3. Review generated files in `heartbeat/`.
 
----
+### Edit Core Context
+
+Use OnBoard `Documents` to edit:
+
+- `SOUL.md`
+- `TOOLS.md`
+- `MEMORY.md`
+- `HEARTBEAT.md`
+- `SCHEDULE.json`
+
+Use OnBoard `Secrets` to edit:
+
+- `.env`
+- `.env.example`
+- `.env_bot`
+- `mail_accounts.json`
+- `mail_accounts.json.example`
+
+## Slash Commands
+
+These are handled locally without needing full model inference.
+
+| Command | Description |
+|---|---|
+| `/help` | show command help |
+| `/wipe` | remove recent bot messages |
+| `/wipe tmp` | clear temporary files |
+| `/list models` | list available text models |
+| `/current model` | show current text model |
+| `/switch model <n>` | switch text model |
+| `/switch image model <n>` | switch image model |
+| `/reset model` | reset to default model |
+| `/list contacts [query]` | search WhatsApp contacts |
+| `/list schedule` | list stored schedules |
+| `/schedule ...` | create a schedule |
+| `/delete task <pid>` | delete one schedule |
+| `/delete schedule` | delete all schedules |
+| `/stop` | stop the bot |
+
+## Security and Operational Notes
+
+- secrets should stay in `secrets/` and remain uncommitted
+- WhatsApp auth is stored locally
+- memory and tools are local files, so they are inspectable
+- heartbeat can be bounded by its own instructions
+- scheduler state is persistent because it lives in `MD/SCHEDULE.json`
+
+## Why the Design Works
+
+H-Claw is strong because it combines:
+
+- human-readable local state
+- multi-client accessibility
+- tool-using AI behavior
+- simple operational surfaces
+- explicit scheduling and heartbeat automation
+
+Instead of hiding important behavior behind opaque internal state, it exposes the working pieces as files and dashboards you can inspect.
+
+## Quick Reference
+
+| Need | Where to look |
+|---|---|
+| bot runtime | `hclaw.js` |
+| web dashboard | `hclaw-onboard.js` |
+| terminal dashboard | `hclaw-cli.js` |
+| AI orchestration | `src/aiHandler.js` |
+| tool execution | `src/aiTools.js` |
+| schedules | `MD/SCHEDULE.json` and `src/scheduleTool.js` |
+| heartbeat rules | `MD/HEARTBEAT.md` |
+| persistent memory | `MD/MEMORY.md` |
 
 <p align="center">
-  <i>"Connecting your digital life through the paw of an AI."</i>
+  <i>H-Claw turns local files, messaging clients, and model tools into one inspectable AI control surface.</i>
 </p>
-
