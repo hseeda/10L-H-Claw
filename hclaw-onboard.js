@@ -24,6 +24,7 @@ const tgLogFile = path.join('logs', 'tg_log.txt');
 const obLogFile = path.join('logs', 'ob_log.txt');
 const queueFile = path.join('tmp', 'onboard_ui_queue.jsonl');
 const tempDir = 'tmp';
+const heartbeatDir = path.join(__dirname, 'heartbeat');
 const botScriptPath = path.resolve(__dirname, 'hclaw.js');
 const isWindows = process.platform === 'win32';
 const LOG_FILEPATH_REGEX = String.raw`(?:[a-zA-Z]:\\[^\n\)\`\'\"]*?\.[a-zA-Z0-9]{1,10})|(?:(?<=^)|(?<=[^a-zA-Z0-9]))(\./[^ \n\)\`\'\"]*?\.[a-zA-Z0-9]{1,10})|(?:(?<=^)|(?<=[^a-zA-Z0-9]))(/[^ \n\)\`\'\"]*?\.[a-zA-Z0-9]{1,10})\b|(?:\b|(?<=\s))([\w.-]+(?:[ ][\w.-]+)*(?:[\/\\][\w.-]+(?:[ ][\w.-]+)*)*\.[a-zA-Z0-9]{1,10})\b`;
@@ -271,6 +272,15 @@ async function readBotLog() {
 async function clearFile(filePath) {
     await fs.promises.mkdir(path.dirname(filePath), { recursive: true });
     await fs.promises.writeFile(filePath, '', 'utf8');
+}
+
+async function clearDirectoryContents(dirPath) {
+    await fs.promises.mkdir(dirPath, { recursive: true });
+    const entries = await fs.promises.readdir(dirPath, { withFileTypes: true });
+    await Promise.all(entries.map((entry) => {
+        const targetPath = path.join(dirPath, entry.name);
+        return fs.promises.rm(targetPath, { recursive: true, force: true });
+    }));
 }
 
 async function enqueueBridgeCommand(payload) {
@@ -1302,6 +1312,10 @@ const html = `<!DOCTYPE html>
                         <i class="fa-solid fa-eraser" aria-hidden="true" style="color: var(--danger);"></i>
                         <span>Clear Tmp</span>
                     </button>
+                    <button class="nav-item" id="sidebar-clear-heartbeat-btn" type="button" data-sidebar-item>
+                        <i class="fa-solid fa-heart-crack" aria-hidden="true" style="color: var(--danger);"></i>
+                        <span>Clean Heartbeat</span>
+                    </button>
                 </div>
             </section>
 
@@ -1587,6 +1601,7 @@ const html = `<!DOCTYPE html>
         const cleanSystemLogBtn = document.getElementById('clean-system-log-btn');
         const cleanBotLogBtn = document.getElementById('clean-bot-log-btn');
         const sidebarClearTmpBtn = document.getElementById('sidebar-clear-tmp-btn');
+        const sidebarClearHeartbeatBtn = document.getElementById('sidebar-clear-heartbeat-btn');
         const mdFileList = document.getElementById('md-file-list');
         const saveMdBtn = document.getElementById('save-md-btn');
         const editorPane = document.getElementById('editor-pane');
@@ -2747,6 +2762,19 @@ const html = `<!DOCTYPE html>
             }
         });
 
+        sidebarClearHeartbeatBtn.addEventListener('click', async () => {
+            const ok = confirm('Delete all generated files and folders in heartbeat directory?');
+            if (!ok) return;
+            try {
+                const response = await fetch('/api/clear-heartbeat');
+                const result = await response.json();
+                if (result.success) alert('Heartbeat directory cleaned');
+                else alert('Failed to clean heartbeat directory');
+            } catch (e) {
+                alert('Failed to clean heartbeat directory');
+            }
+        });
+
         saveMdBtn.addEventListener('click', () => saveMdFile());
         editorTextarea.addEventListener('input', function() {
             updateGutter('editor', editorTextarea.value);
@@ -3139,6 +3167,17 @@ const server = http.createServer((req, res) => {
             res.writeHead(200, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ success: true }));
         }).catch(e => {
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: false, error: e.message }));
+        });
+        return;
+    }
+
+    if (pathname === '/api/clear-heartbeat' && method === 'GET') {
+        clearDirectoryContents(heartbeatDir).then(() => {
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: true }));
+        }).catch((e) => {
             res.writeHead(500, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ success: false, error: e.message }));
         });

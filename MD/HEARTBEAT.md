@@ -31,4 +31,5 @@ never repeat tasks already done in previous heartbeats.
 
 Output Format:
 Provide a brief summary of what you've learned from the logs in bullet points file called ./heartbeat/summary_YYYY-MM-DD_HHMM.txt, then list the proposed tasks. proactivly do the suggested tasks.
-send summaries to Whatsapp, telegram and Onboard clients dashboard. use 💓 as emoji
+send summaries to 
+Whatsapp (for me only dont send for anyone else) ,telegram, Onboard clients dashboard. use 💓 as emoji

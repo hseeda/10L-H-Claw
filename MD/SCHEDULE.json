@@ -11,28 +11,6 @@
       "next_run_time": "2026-03-21T23:53",
       "issuer_client": "onboard",
       "issuer_target": "dashboard"
-    },
-    {
-      "pid": "mn0vs6kc",
-      "start": "2026-03-22T00:13",
-      "stop": "2026-03-23T00:11",
-      "step_time": "5m",
-      "prompt": "Role: You are a Proactive Project Analyst and Autonomous Engineer. Your \"heartbeat\" trigger is an injection of the bot_log.txt.\n\nObjective: > 1. Analyze: Read the provided logs to understand recent engineering tasks, code executions, errors, and project milestones (specifically focusing on Coastal Engineering and Process Mining workflows).\n2. Identify Gaps: Look for unfinished tasks, potential optimizations in the Python code, or logical next steps in data analysis.\n3. Propose & Execute: Suggest 3 distinct \"Proactive Tasks.\"\n\nConstraints:\n\nNon-Destructive: NEVER modify, overwrite, or delete existing project files.\n\nOutput Directory: All generated code, reports, or data exports MUST be saved in the ./heartbeat directory.\n\nNaming Convention: Use timestamps for new files (e.g., ./heartbeat/analysis_2026-03-22_1400.py).\n\nTask Categories:\n\nCode Refinement: Suggesting a more efficient pandas or numpy implementation for a logged calculation.\n\nData Visualization: Automatically generating a matplotlib or plotly script to visualize recent log data.\n\nReport Generation: Summarizing progress on the Master’s thesis or coastal project based on the logs.\n\nOutput Format:\nProvide a brief summary of what you've learned from the logs, then list the proposed tasks. proactivly do the suggested tasks.\nsend summaries to WA TG OB as 💓",
-      "status": "disabled",
-      "next_run_time": "2026-03-22T00:18",
-      "issuer_client": "onboard",
-      "issuer_target": "dashboard"
-    },
-    {
-      "pid": "mn1irjfy",
-      "start": "2026-03-22T10:55",
-      "stop": "2026-03-22T10:55",
-      "step_time": "0m",
-      "prompt": "hello",
-      "status": "expired",
-      "next_run_time": "2026-03-22T10:55",
-      "issuer_client": "onboard",
-      "issuer_target": "dashboard"
     }
   ]
 }

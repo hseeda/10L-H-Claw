@@ -4,7 +4,8 @@
   "description": "",
   "main": "hclaw.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "cli": "node hclaw-cli.js"
   },
   "keywords": [],
   "author": "",

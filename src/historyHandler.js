@@ -78,6 +78,7 @@ function appendHistory(platform, target, arg1, arg2) {
         const chatId = target;
         const userText = arg1;
         const assistantText = arg2;
+        const telegramHistoryLimit = parseInt(process.env.TELEGRAM_HISTORY_LIMIT || '50', 10);
 
         if (!historyStore.telegram[chatId]) historyStore.telegram[chatId] = [];
 
@@ -86,6 +87,10 @@ function appendHistory(platform, target, arg1, arg2) {
         }
         if (assistantText) {
             historyStore.telegram[chatId].push(`[${time}] H-Claw: ${assistantText}`);
+        }
+
+        if (historyStore.telegram[chatId].length > telegramHistoryLimit) {
+            historyStore.telegram[chatId] = historyStore.telegram[chatId].slice(-telegramHistoryLimit);
         }
     } else if (platform === 'onboard') {
         const role = arg1;

@@ -267,15 +267,19 @@ const tgClient = {
 
     /**
      * Fetches recent updates (messages) from Telegram.
+     * timeout=0 for one-shot (used on init), timeout>0 for long-polling.
      */
-    async getTelegramUpdates(offset = 0, limit = 10) {
+    async getTelegramUpdates(offset = 0, limit = 10, timeout = 0) {
         const token = process.env.TELEGRAM_BOT_TOKEN;
         if (!token) throw new Error('TELEGRAM_BOT_TOKEN is missing in .env');
 
-        const url = `https://api.telegram.org/bot${token}/getUpdates?offset=${offset}&limit=${limit}`;
+        const url = `https://api.telegram.org/bot${token}/getUpdates?offset=${offset}&limit=${limit}&timeout=${timeout}`;
+        const fetchOpts = timeout > 0
+            ? { signal: AbortSignal.timeout((timeout + 10) * 1000) }
+            : {};
 
         try {
-            const response = await fetch(url);
+            const response = await fetch(url, fetchOpts);
             const data = await response.json();
             if (!data.ok) throw new Error(data.description || 'Failed to fetch Telegram updates');
             return data;
@@ -376,21 +380,32 @@ async function deepWipe(chatId) {
         } catch (err) {}
     }
 
-    // 2. Perform brute-force backward deletion from the latest ID
-    for (let i = 1; i <= MAX_ATTEMPTS; i++) {
-        const targetId = startId - i;
-        if (targetId <= 0) break;
+    // 2. Perform brute-force backward deletion from the latest ID, in parallel batches
+    const BATCH_SIZE = 20;
+    const BATCH_PAUSE_MS = 1000; // 20 deletes/sec — within Telegram's safe rate
+    let consecutiveEmptyBatches = 0;
 
-        try {
-            const res = await tgClient.deleteTelegramMessage(chatId, targetId);
-            if (res && res.ok !== false) {
-                deletedCount++;
-                failureStreak = 0; // Reset streak on success
-            } else {
-                failureStreak++;
-            }
-        } catch (err) {
-            failureStreak++;
+    for (let i = 1; i <= MAX_ATTEMPTS && failureStreak < MAX_FAILURE_STREAK; i += BATCH_SIZE) {
+        const batch = [];
+        for (let j = i; j < i + BATCH_SIZE && j <= MAX_ATTEMPTS; j++) {
+            const targetId = startId - j;
+            if (targetId <= 0) break;
+            batch.push(tgClient.deleteTelegramMessage(chatId, targetId));
+        }
+        if (batch.length === 0) break;
+
+        const results = await Promise.all(batch);
+        let batchSuccesses = 0;
+        for (const res of results) {
+            if (res && res.ok !== false) { deletedCount++; batchSuccesses++; }
+        }
+
+        if (batchSuccesses === 0) {
+            failureStreak += batch.length;
+            consecutiveEmptyBatches++;
+        } else {
+            failureStreak = 0;
+            consecutiveEmptyBatches = 0;
         }
 
         if (failureStreak >= MAX_FAILURE_STREAK) {
@@ -398,9 +413,9 @@ async function deepWipe(chatId) {
             break;
         }
 
-        // Small delay to avoid rate limits (30 msgs/sec is the limit, so 40ms is safe)
-        if (i % 20 === 0) await new Promise(resolve => setTimeout(resolve, 500));
-        else await new Promise(resolve => setTimeout(resolve, 50));
+        if (i + BATCH_SIZE <= MAX_ATTEMPTS) {
+            await new Promise(resolve => setTimeout(resolve, BATCH_PAUSE_MS));
+        }
     }
 
     // Clear local tracking and history for this chat
@@ -566,7 +581,7 @@ async function initializeTelegramClient(whatsappClient = null) {
 
     async function poll() {
         try {
-            const updates = await tgClient.getTelegramUpdates(lastUpdateId + 1);
+            const updates = await tgClient.getTelegramUpdates(lastUpdateId + 1, 10, 25);
             for (const update of updates.result) {
                 lastUpdateId = update.update_id;
                 
@@ -677,8 +692,12 @@ async function initializeTelegramClient(whatsappClient = null) {
                 isPolling = false;
                 return;
             }
+            // Transient error — short pause before retry
+            setTimeout(poll, 2000);
+            return;
         }
-        setTimeout(poll, 3000);
+        // Long-poll returned (with or without updates) — immediately start the next one
+        setImmediate(poll);
     }
 
     poll();

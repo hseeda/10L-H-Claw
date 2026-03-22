@@ -370,9 +370,9 @@ async function handleSendMessage(msg) {
 
 async function processQueuedCommands() {
     try {
-        if (!fs.existsSync(queueFile)) return;
+        if (!fs.existsSync(queueFile)) return false;
         const stats = fs.statSync(queueFile);
-        if (stats.size <= queueReadOffset) return;
+        if (stats.size <= queueReadOffset) return false;
 
         const handle = await fs.promises.open(queueFile, 'r');
         try {
@@ -394,17 +394,31 @@ async function processQueuedCommands() {
                     console.error('Queue payload error:', error.message);
                 }
             }
+            return lines.length > 0;
         } finally {
             await handle.close();
         }
     } catch (error) {
         console.error('Queue processing error:', error.message);
+        return false;
     }
 }
 
-setInterval(() => {
-    processQueuedCommands();
-}, 700);
+const QUEUE_POLL_MIN = 150;
+const QUEUE_POLL_MAX = 5000;
+let queuePollDelay = QUEUE_POLL_MIN;
+
+function scheduleQueuePoll() {
+    setTimeout(async () => {
+        const hadWork = await processQueuedCommands();
+        queuePollDelay = hadWork
+            ? QUEUE_POLL_MIN
+            : Math.min(queuePollDelay * 2, QUEUE_POLL_MAX);
+        scheduleQueuePoll();
+    }, queuePollDelay);
+}
+
+scheduleQueuePoll();
 
 startSchedulerPolling();
 
