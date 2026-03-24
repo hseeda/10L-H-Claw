@@ -1,3 +1,4 @@
+require("dns").setDefaultResultOrder("ipv4first");
 const fs = require('fs');
 const path = require('path');
 // aiHandler is lazy-loaded in initializeTelegramBot to avoid circular dependency

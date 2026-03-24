@@ -1,0 +1,56 @@
+Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: Links
+Source: http://links.twibright.com/
+
+Files: *
+Copyright: 1999-2023 Mikulas Patocka <mikulas@twibright.com>
+           2000-2013 Karel Kulhavy <clock@twibright.com>
+           2000-2013 Petr Kulhavy <brain@twibright.com>
+           2000-2013 Martin Pergel <perm@twibright.com>
+Comment: Dates taken from links.h and updated according to ChangeLog
+ entries.
+License: GPL-2+ with OpenSSL exception
+
+Files: suffix/public_suffix_list.dat
+Copyright: 2010-2012 Daniel Veditz,
+                     Ehsan Akhgari,
+                     Gervase Markham,
+                     Jason Duell,
+                     Jothan Frakes,
+                     Mitchell Field,
+                     Mounir Lamouri,
+                     Ruben Arakelyan,
+                     Simone Carletti
+License: MPL-2.0
+
+Files: debian/*
+Copyright: 2004-2010 Gürkan Sengün <gurkan@phys.ethz.ch>
+           2010-2023 Axel Beckert <abe@debian.org>
+License: GPL-2+ with OpenSSL exception
+
+License: GPL-2+ with OpenSSL exception
+ This program is free software. You can redistribute it and/or modify
+ under the terms of the GNU General Public License as published by the
+ Free Software Foundation; either version 2 of the License, or (at
+ your option) any later version.
+ .
+ On Debian systems, the complete text of version 1 of the GNU General
+ Public License can be found in `/usr/share/common-licenses/GPL-2'.
+ .
+ In addition, as a special exception, the copyright holders give
+ permission to link the code of portions of this program with the
+ OpenSSL library under certain conditions as described in each
+ individual source file, and distribute linked combinations including
+ the two.
+ .
+ You must obey the GNU General Public License in all respects for all
+ of the code used other than OpenSSL.  If you modify file(s) with this
+ exception, you may extend this exception to your version of the
+ file(s), but you are not obligated to do so.  If you do not wish to
+ do so, delete this exception statement from your version.  If you
+ delete this exception statement from all source files in the program,
+ then also delete it here.
+
+License: MPL-2.0
+ On Debian systems, the complete text of the Mozilla Public License
+ Version 2.0 can be found in `/usr/share/common-licenses/MPL-2.0'.

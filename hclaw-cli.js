@@ -49,6 +49,7 @@ let lastNotice = 'Type a message to send it as OnBoard. Use :help for local comm
 let lastLogSnapshot = '';
 let renderTimer = null;
 let typingPauseTimer = null;
+let lastRenderedFrame = '';
 
 const rl = readline.createInterface({
     input: process.stdin,
@@ -383,13 +384,22 @@ async function renderScreen() {
     }
     visibleLines.push(divider);
     visibleLines.push(notice);
+    const nextFrame = visibleLines.join('\n') + '\n';
+
+    if (nextFrame === lastRenderedFrame) {
+        rl.setPrompt(`${ANSI.bold}${ANSI.cyan}›${ANSI.reset} `);
+        rl.prompt(true);
+        return;
+    }
+
+    lastRenderedFrame = nextFrame;
 
     readline.cursorTo(process.stdout, 0, 0);
     readline.clearScreenDown(process.stdout);
-    process.stdout.write(visibleLines.join('\n') + '\n');
+    process.stdout.write(nextFrame);
 
     rl.setPrompt(`${ANSI.bold}${ANSI.cyan}›${ANSI.reset} `);
-    rl.prompt();
+    rl.prompt(true);
 }
 
 async function handleLocalCommand(commandText) {
@@ -398,30 +408,35 @@ async function handleLocalCommand(commandText) {
     if (trimmed === ':help') {
         setActiveView('help');
         lastNotice = 'Local command help.';
+        lastRenderedFrame = '';
         return;
     }
 
     if (trimmed === ':status') {
         const running = await isBotRunning();
         lastNotice = running ? `Bot is running${botPid ? ` (pid ${botPid})` : ''}.` : 'Bot is stopped.';
+        lastRenderedFrame = '';
         return;
     }
 
     if (trimmed === ':start') {
         const started = await startBot();
         lastNotice = started ? 'Bot started.' : 'Bot already running.';
+        lastRenderedFrame = '';
         return;
     }
 
     if (trimmed === ':stop') {
         await stopBot();
         lastNotice = 'Bot stopped.';
+        lastRenderedFrame = '';
         return;
     }
 
     if (trimmed === ':restart') {
         await restartBot();
         lastNotice = 'Bot restarted.';
+        lastRenderedFrame = '';
         return;
     }
 
@@ -433,12 +448,14 @@ async function handleLocalCommand(commandText) {
         }
         setActiveView(view);
         lastNotice = `Switched live pane to ${view}.`;
+        lastRenderedFrame = '';
         return;
     }
 
     if (trimmed === ':schedules') {
         setActiveView('schedules');
         lastNotice = 'Showing schedules.';
+        lastRenderedFrame = '';
         return;
     }
 
@@ -446,6 +463,7 @@ async function handleLocalCommand(commandText) {
         const pid = trimmed.slice(':schedule delete '.length).trim();
         lastNotice = deleteSchedule(pid);
         setActiveView('schedules');
+        lastRenderedFrame = '';
         return;
     }
 
@@ -455,6 +473,7 @@ async function handleLocalCommand(commandText) {
     }
 
     lastNotice = 'Unknown local command. Use :help';
+    lastRenderedFrame = '';
 }
 
 async function sendOnboardText(text) {
@@ -470,6 +489,7 @@ async function sendOnboardText(text) {
     });
     setActiveView('system');
     lastNotice = 'Sent through OnBoard bridge.';
+    lastRenderedFrame = '';
 }
 
 async function handleLine(input) {
@@ -524,6 +544,7 @@ function returnToLiveLog() {
     renderPaused = false;
     setActiveView(lastLiveLog || 'system');
     lastNotice = `Returned to ${activeLog} log.`;
+    lastRenderedFrame = '';
     return true;
 }
 
@@ -560,6 +581,7 @@ async function main() {
 
 rl.on('close', () => {
     stopRenderLoop();
+    lastRenderedFrame = '';
     if (typingPauseTimer) {
         clearTimeout(typingPauseTimer);
         typingPauseTimer = null;

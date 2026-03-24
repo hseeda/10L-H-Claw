@@ -7,8 +7,8 @@
       "stop": "2026-03-22T18:05",
       "step_time": "2m",
       "prompt": "hello",
-      "status": "disabled",
-      "next_run_time": "2026-03-21T23:53",
+      "status": "expired",
+      "next_run_time": "2026-03-22T18:05",
       "issuer_client": "onboard",
       "issuer_target": "dashboard"
     }

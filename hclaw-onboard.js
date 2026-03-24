@@ -26,6 +26,7 @@ const obLogFile = path.join('logs', 'ob_log.txt');
 const queueFile = path.join('tmp', 'onboard_ui_queue.jsonl');
 const tempDir = 'tmp';
 const heartbeatDir = path.join(__dirname, 'heartbeat');
+const onboardStateFile = path.join('public', 'onboard_state.json');
 const botScriptPath = path.resolve(__dirname, 'hclaw.js');
 const isWindows = process.platform === 'win32';
 const editableSecretFiles = [
@@ -41,6 +42,37 @@ const MAX_LOG_VIEW_CHARS = 120000;
 let botProcess = null;
 let botPid = null;
 let startInFlight = false;
+
+function readOnboardState() {
+    try {
+        if (!fs.existsSync(onboardStateFile)) {
+            return { listenMode: false };
+        }
+
+        const raw = fs.readFileSync(onboardStateFile, 'utf8');
+        const parsed = JSON.parse(raw || '{}');
+        return {
+            listenMode: Boolean(parsed.listenMode)
+        };
+    } catch (error) {
+        return { listenMode: false };
+    }
+}
+
+function writeOnboardState(nextState) {
+    const current = readOnboardState();
+    const merged = {
+        listenMode: Boolean(nextState && Object.prototype.hasOwnProperty.call(nextState, 'listenMode') ? nextState.listenMode : current.listenMode)
+    };
+
+    fs.mkdirSync(path.dirname(onboardStateFile), { recursive: true });
+    fs.writeFileSync(onboardStateFile, JSON.stringify(merged, null, 2), 'utf8');
+    return merged;
+}
+
+function isListenModeEnabled() {
+    return readOnboardState().listenMode;
+}
 
 function isEditableFilePath(filePathParam) {
     const filePath = String(filePathParam || '').trim().replace(/\\/g, '/');
@@ -201,6 +233,7 @@ async function isBotRunning() {
 
 async function startBot() {
     if (startInFlight) return;
+    if (isListenModeEnabled()) return;
     startInFlight = true;
     try {
         if (await isBotRunning()) return;
@@ -261,6 +294,7 @@ async function stopBot() {
 }
 
 async function restartBot() {
+    if (isListenModeEnabled()) return;
     await stopBot();
     await startBot();
 }
