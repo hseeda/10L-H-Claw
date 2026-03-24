@@ -40,7 +40,7 @@ const botLogStream = fs.createWriteStream(botLogFile, { flags: 'a' });
 const originalLog = console.log;
 const originalWarn = console.warn;
 const originalError = console.error;
-const LOG_SEPARATOR = '────────────────────────────────────────────────────────────────────────────────────────────────────';
+const LOG_SEPARATOR = '──────────────────────────────────────';
 
 function getTimestamp() {
     const d = new Date();

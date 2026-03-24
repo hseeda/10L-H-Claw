@@ -149,30 +149,36 @@ async function handleCommand(cmdText) {
 }
 
 async function handleOnboardDashboardMessage(msg, whatsappClient = null) {
-    const { text, image_path: imagePath, history_limit: historyLimit } = msg;
+    const {
+        text,
+        image_path: imagePath,
+        media_path: mediaPath,
+        history_limit: historyLimit
+    } = msg;
+            const attachedMediaPath = mediaPath || imagePath || '';
             const promptParts = [];
 
             if (typeof text === 'string' && text.trim()) {
                 promptParts.push(text.trim());
             }
 
-            if (imagePath) {
-                const mediaAnalysis = await analyzeLocalMediaFile(imagePath);
-                promptParts.push(`[ATTACHED IMAGE PATH]\n${imagePath}`);
-                promptParts.push(`[ATTACHED IMAGE ANALYSIS]\n${mediaAnalysis}`);
+            if (attachedMediaPath) {
+                const mediaAnalysis = await analyzeLocalMediaFile(attachedMediaPath);
+                promptParts.push(`[ATTACHED MEDIA PATH]\n${attachedMediaPath}`);
+                promptParts.push(`[ATTACHED MEDIA ANALYSIS]\n${mediaAnalysis}`);
             }
 
-            const prompt = promptParts.join('\n\n') || 'Please inspect the attached image and respond.';
+            const prompt = promptParts.join('\n\n') || 'Please inspect the attached media and respond.';
             const injectedHistory = await historyHandler.getHistory('onboard', Number(historyLimit));
 
             const { appendBotLog } = require('./loggerTool');
             const inputText = typeof text === 'string' ? text.trim() : '';
             
             // Log incoming dashboard input
-            const inputLine = `📩 [OB] Input: ${inputText || '(image/prompt)'}`;
+                const inputLine = `📩 [OB] Input: ${inputText || '(media/prompt)'}`;
 
             if (!inputText.startsWith('/')) {
-                appendBotLog(`👤 ${inputText || '(image/prompt)'}`);
+                    appendBotLog(`👤 ${inputText || '(media/prompt)'}`);
             }
             console.log(inputLine);
 
@@ -193,17 +199,17 @@ async function handleOnboardDashboardMessage(msg, whatsappClient = null) {
                 const { appendBotLog } = require('./loggerTool');
                 appendBotLog(response);
                 console.log(replyLine);
-                historyHandler.appendHistory('onboard', null, 'user', typeof text === 'string' && text.trim() ? text : '(image only)');
+                historyHandler.appendHistory('onboard', null, 'user', typeof text === 'string' && text.trim() ? text : '(media only)');
                 historyHandler.appendHistory('onboard', null, 'assistant', response);
 
-                if (imagePath && fs.existsSync(imagePath)) {
-                    try { fs.unlinkSync(imagePath); } catch (e) {}
+                if (attachedMediaPath && fs.existsSync(attachedMediaPath)) {
+                    try { fs.unlinkSync(attachedMediaPath); } catch (e) {}
                 }
 
             } catch (e) {
                 console.error(`❌ [OB] Error generating response:`, e.message);
-                if (imagePath && fs.existsSync(imagePath)) {
-                    try { fs.unlinkSync(imagePath); } catch (cleanupError) {}
+                if (attachedMediaPath && fs.existsSync(attachedMediaPath)) {
+                    try { fs.unlinkSync(attachedMediaPath); } catch (cleanupError) {}
                 }
             }
 }

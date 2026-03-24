@@ -630,31 +630,6 @@ const html = `<!DOCTYPE html>
             letter-spacing: -0.03em;
         }
 
-        .mobile-menu-btn {
-            display: none;
-            width: 42px;
-            height: 42px;
-            border: 1px solid var(--line-strong);
-            border-radius: 12px;
-            background: rgba(255, 255, 255, 0.96);
-            color: var(--text);
-            align-items: center;
-            justify-content: center;
-            font-size: 18px;
-            box-shadow: 0 4px 10px rgba(18, 22, 28, 0.04);
-        }
-
-        .sidebar-backdrop {
-            display: none;
-            position: fixed;
-            inset: 0;
-            background: rgba(18, 22, 28, 0.46);
-            opacity: 0;
-            pointer-events: none;
-            transition: opacity 160ms ease;
-            z-index: 1200;
-        }
-
         .sidebar-section {
             padding: 2px 0 0;
         }
@@ -1269,16 +1244,6 @@ const html = `<!DOCTYPE html>
         }
 
         @media (max-width: 900px) {
-            html,
-            body {
-                overflow: auto;
-                min-height: 100%;
-            }
-
-            body {
-                overflow: auto;
-            }
-
             .app-shell {
                 flex-direction: column;
                 height: auto;
@@ -1287,186 +1252,24 @@ const html = `<!DOCTYPE html>
             }
 
             .sidebar {
-                position: fixed;
-                top: 0;
-                left: 0;
-                width: min(84vw, 320px);
-                max-height: 100vh;
-                height: 100vh;
+                width: 100%;
+                max-height: 42vh;
                 flex: 0 0 auto;
-                border-right: 1px solid var(--line);
-                border-bottom: 0;
-                padding: 14px 10px 16px;
-                transform: translateX(-100%);
-                transition: transform 180ms ease;
-                z-index: 1300;
-                box-shadow: 0 18px 40px rgba(18, 22, 28, 0.16);
-            }
-
-            body.mobile-menu-open .sidebar {
-                transform: translateX(0);
-            }
-
-            body.mobile-menu-open .sidebar-backdrop {
-                display: block;
-                opacity: 1;
-                pointer-events: auto;
+                border-right: 0;
+                border-bottom: 1px solid var(--line);
             }
 
             .main-shell {
                 min-height: 0;
                 flex: 1 1 auto;
-                overflow: visible;
-            }
-
-            .workspace {
-                min-height: 0;
             }
 
             .topbar,
             .workspace-header,
             .chat-stage,
-            .settings-pane,
             .composer-card {
                 padding-left: 16px;
                 padding-right: 16px;
-            }
-
-            .brand {
-                padding: 4px 12px 10px;
-            }
-
-            .mobile-menu-btn {
-                display: inline-flex;
-            }
-
-            .brand-title {
-                font-size: 17px;
-            }
-
-            .topbar-controls {
-                width: 100%;
-                justify-content: flex-start;
-                gap: 8px;
-                flex-wrap: nowrap;
-            }
-
-            .action-pill {
-                flex: 0 0 38px;
-                min-width: 38px;
-                width: 38px;
-                height: 38px;
-                padding: 0;
-                gap: 0;
-                border-radius: 10px;
-                display: inline-flex;
-                align-items: center;
-                justify-content: center;
-            }
-
-            .action-pill i {
-                font-size: 13px;
-                margin: 0;
-                line-height: 1;
-            }
-
-            .action-pill span {
-                display: none;
-            }
-
-            .status-pill {
-                width: 38px;
-                min-width: 38px;
-                height: 38px;
-                padding: 0;
-                font-size: 0;
-                display: inline-flex;
-                align-items: center;
-                justify-content: center;
-                overflow: hidden;
-            }
-
-            .section-heading {
-                padding: 8px 12px;
-                font-size: 13px;
-            }
-
-            .nav-item {
-                gap: 12px;
-                padding: 12px 14px;
-            }
-
-            .nav-item i {
-                width: 20px;
-                font-size: 18px;
-            }
-
-            .nav-item span {
-                font-size: 15px;
-            }
-
-            .chat-stage {
-                padding-top: 10px;
-                padding-bottom: 12px;
-                height: clamp(280px, 48vh, 520px);
-                min-height: 280px;
-            }
-
-            .log-container {
-                padding-right: 0;
-                height: 100%;
-            }
-
-            .gutter {
-                display: none;
-            }
-
-            .log-pane {
-                min-height: 0;
-                height: 100%;
-            }
-
-            .log-pane.visible {
-                height: 100%;
-            }
-
-            .chat-board {
-                margin-right: 0;
-                padding: 14px;
-                font-size: 13px;
-                line-height: 1.5;
-                height: 100%;
-            }
-
-            .settings-pane {
-                padding-top: 14px;
-                padding-bottom: 14px;
-            }
-
-            .settings-card {
-                max-width: none;
-            }
-
-            .settings-input {
-                width: 100%;
-                max-width: none;
-            }
-
-            .composer-card {
-                padding-top: 10px;
-            }
-
-            #token-usage-chart,
-            #token-usage-trend-chart,
-            #token-usage-table-wrap,
-            #schedule-table-wrap {
-                overflow-x: auto;
-            }
-
-            #schedule-modal-panel {
-                min-width: 0 !important;
-                width: min(94vw, 520px) !important;
-                padding: 20px 18px !important;
             }
         }
 
@@ -1482,28 +1285,29 @@ const html = `<!DOCTYPE html>
                 flex-direction: column;
             }
 
-            .topbar-title {
+            .topbar-controls {
                 width: 100%;
-                justify-content: space-between;
-                align-items: center;
+                justify-content: flex-start;
             }
 
-            .topbar-controls {
-                gap: 8px;
+            .action-pill {
+                min-width: 120px;
+                justify-content: center;
             }
 
             .composer-panel {
-                padding: 14px;
+                padding: 18px;
             }
 
             .composer-row {
                 align-items: stretch;
-                gap: 10px;
             }
 
             .composer-select,
             .composer-target,
-            .composer-message {
+            .composer-message,
+            .attach-btn,
+            .send-btn {
                 width: 100%;
             }
 
@@ -1512,60 +1316,9 @@ const html = `<!DOCTYPE html>
                 align-items: flex-start;
             }
 
-            .attach-btn,
             .send-btn {
-                width: 46px;
-                min-width: 46px;
-                height: 46px;
-            }
-
-            .send-btn {
-                border-radius: 14px;
-            }
-
-            .workspace-header {
-                align-items: flex-start;
-                gap: 12px;
-            }
-
-            .workspace-label {
-                gap: 10px;
-                font-size: 15px;
-            }
-
-            .workspace-label i {
-                font-size: 18px;
-            }
-
-            .clean-btn {
-                min-height: 38px;
-                padding: 0 12px;
-                font-size: 14px;
-            }
-
-            .settings-card {
-                padding: 14px;
-            }
-
-            .settings-card h3 {
-                font-size: 18px;
-            }
-
-            .settings-card p,
-            .settings-note,
-            .settings-field label,
-            .composer-hint,
-            .composer-attachment {
-                font-size: 14px;
-            }
-
-            .status-pill {
-                width: auto;
-                min-width: 0;
-                height: 38px;
-                padding: 0 10px;
-                font-size: 13px;
-                white-space: nowrap;
+                border-radius: 16px;
+                height: 50px;
             }
 
             .filepath-link {
@@ -1582,7 +1335,6 @@ const html = `<!DOCTYPE html>
 </head>
 <body>
     <div class="app-shell">
-        <div class="sidebar-backdrop" id="sidebar-backdrop" aria-hidden="true"></div>
         <aside class="sidebar" aria-label="Sidebar">
             <div class="brand">
                 <div class="brand-mark" aria-hidden="true">
@@ -1609,7 +1361,7 @@ const html = `<!DOCTYPE html>
                     </button>
                     <button class="nav-item" id="sidebar-clear-tmp-btn" type="button" data-sidebar-item>
                         <i class="fa-solid fa-eraser" aria-hidden="true" style="color: var(--danger);"></i>
-                        <span>Clean Tmp</span>
+                        <span>Clear Tmp</span>
                     </button>
                     <button class="nav-item" id="sidebar-clear-heartbeat-btn" type="button" data-sidebar-item>
                         <i class="fa-solid fa-heart-crack" aria-hidden="true" style="color: var(--danger);"></i>
@@ -1617,7 +1369,7 @@ const html = `<!DOCTYPE html>
                     </button>
                     <button class="nav-item" id="sidebar-clear-token-usage-btn" type="button" data-sidebar-item>
                         <i class="fa-solid fa-chart-line" aria-hidden="true" style="color: var(--danger);"></i>
-                        <span>Clean Token History</span>
+                        <span>Clear Token History</span>
                     </button>
                     <button class="nav-item" id="sidebar-clear-all-logs-btn" type="button" data-sidebar-item>
                         <i class="fa-solid fa-broom" aria-hidden="true" style="color: var(--danger);"></i>
@@ -1693,17 +1445,12 @@ const html = `<!DOCTYPE html>
         <main class="main-shell">
             <header class="topbar">
                 <div class="topbar-title">
-                    <div style="display:flex;align-items:center;gap:16px;min-width:0;">
-                        <div class="brand-mark" aria-hidden="true">
-                            <i class="fa-solid fa-paw paw paw-1"></i>
-                            <i class="fa-solid fa-paw paw paw-2"></i>
-                            <i class="fa-solid fa-paw paw paw-3"></i>
-                        </div>
-                        <h2>H-Claw Admin</h2>
+                    <div class="brand-mark" aria-hidden="true">
+                        <i class="fa-solid fa-paw paw paw-1"></i>
+                        <i class="fa-solid fa-paw paw paw-2"></i>
+                        <i class="fa-solid fa-paw paw paw-3"></i>
                     </div>
-                    <button class="mobile-menu-btn" id="mobile-menu-btn" type="button" aria-label="Open menu" aria-expanded="false">
-                        <i class="fa-solid fa-bars" aria-hidden="true"></i>
-                    </button>
+                    <h2>H-Claw Admin</h2>
                 </div>
 
                 <div class="topbar-controls">
@@ -1986,8 +1733,6 @@ const html = `<!DOCTYPE html>
         const navSettings = document.getElementById('nav-settings');
         const navTokenUsage = document.getElementById('nav-token-usage');
         const statusPill = document.getElementById('status-pill');
-        const mobileMenuBtn = document.getElementById('mobile-menu-btn');
-        const sidebarBackdrop = document.getElementById('sidebar-backdrop');
         const workspaceIcon = document.getElementById('workspace-icon');
         const workspaceTitle = document.getElementById('workspace-title');
         const workspace = document.querySelector('.workspace');
@@ -2049,23 +1794,6 @@ const html = `<!DOCTYPE html>
         let composerDraft = '';
         let composerAttachmentPayload = null;
         const logPathRegex = new RegExp('${LOG_FILEPATH_REGEX.replace(/\\/g, "\\\\").replace(/\'/g, () => "\\\'")}', 'g');
-
-        function isMobileLayout() {
-            return window.innerWidth <= 900;
-        }
-
-        function closeMobileMenu() {
-            document.body.classList.remove('mobile-menu-open');
-            if (mobileMenuBtn) mobileMenuBtn.setAttribute('aria-expanded', 'false');
-        }
-
-        function toggleMobileMenu(forceOpen) {
-            const nextOpen = typeof forceOpen === 'boolean'
-                ? forceOpen
-                : !document.body.classList.contains('mobile-menu-open');
-            document.body.classList.toggle('mobile-menu-open', nextOpen);
-            if (mobileMenuBtn) mobileMenuBtn.setAttribute('aria-expanded', nextOpen ? 'true' : 'false');
-        }
 
         function escapeHtml(text) {
             if (!text) return '';
@@ -2361,8 +2089,6 @@ const html = `<!DOCTYPE html>
         function setStatusPill(running) {
             statusPill.textContent = running ? 'Running' : 'Stopped';
             statusPill.style.background = running ? '#1b5e20' : '#b71c1c';
-            statusPill.setAttribute('aria-label', running ? 'Running' : 'Stopped');
-            statusPill.setAttribute('title', running ? 'Running' : 'Stopped');
         }
 
         function setComposerStatus(message, tone) {
@@ -2395,8 +2121,6 @@ const html = `<!DOCTYPE html>
                 _botIsRunning = false;
                 statusPill.textContent = 'Unreachable';
                 statusPill.style.background = '#92400e';
-                statusPill.setAttribute('aria-label', 'Unreachable');
-                statusPill.setAttribute('title', 'Unreachable');
                 if (activeView === 'schedule') loadSchedules();
             }
         }
@@ -3120,7 +2844,6 @@ const html = `<!DOCTYPE html>
         sidebarItems.forEach((item) => {
             item.addEventListener('click', () => {
                 if (item.disabled) return;
-                if (isMobileLayout()) closeMobileMenu();
                 sidebarItems.forEach((button) => {
                     button.classList.remove('active');
                     button.removeAttribute('aria-current');
@@ -3137,11 +2860,6 @@ const html = `<!DOCTYPE html>
                 const isCollapsed = section.classList.toggle('collapsed');
                 toggle.setAttribute('aria-expanded', String(!isCollapsed));
             });
-        });
-        mobileMenuBtn.addEventListener('click', () => toggleMobileMenu());
-        sidebarBackdrop.addEventListener('click', () => closeMobileMenu());
-        window.addEventListener('resize', () => {
-            if (!isMobileLayout()) closeMobileMenu();
         });
 
         startBtn.addEventListener('click', () => requestBotAction('start'));

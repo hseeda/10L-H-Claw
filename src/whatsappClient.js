@@ -465,7 +465,7 @@ function initializeWhatsAppClient() {
             // Only take commands/replies if isSelf is true (already filtered above)
             let prompt = msg.body;
             if (msg.hasMedia) {
-                prompt += `\n\n[MEDIA ATTACHED: Use whatsapp_read_media with message_id: "${msg.id._serialized}" to understand/read this media (audio, image, document, etc.)]`;
+                prompt += `\n[MEDIA: whatsapp_read_media("${msg.id._serialized}")]`;
             }
             const aiReply = await generateAIResponse(prompt, isSelf, client, chatHistory, 'whatsapp');
             

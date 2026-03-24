@@ -1,5 +1,14 @@
 let isShuttingDown = false;
 
+function isIgnorableWhatsAppShutdownError(error) {
+    const message = String(error?.message || '').toLowerCase();
+    return message.includes('detached frame')
+        || message.includes('execution context was destroyed')
+        || message.includes('target closed')
+        || message.includes('session closed')
+        || message.includes('protocol error');
+}
+
 async function stopServer() {
     if (isShuttingDown) return;
     isShuttingDown = true;
@@ -22,15 +31,17 @@ async function stopServer() {
     }
 
     // 1. WhatsApp Notification
-    const { getWhatsappClient } = require('./whatsappClient');
+    const { getWhatsappClient, isWhatsAppReady } = require('./whatsappClient');
     const client = getWhatsappClient();
     try {
-        if (client && client.info && client.info.wid) {
+        if (client && isWhatsAppReady() && client.info && client.info.wid) {
             const selfChatId = client.info.wid._serialized;
             await client.sendMessage(selfChatId, '🐾 *H-Claw stopped!* 🛑');
         }
     } catch (err) {
-        console.error('Failed to send WhatsApp stop message:', err.message);
+        if (!isIgnorableWhatsAppShutdownError(err)) {
+            console.error('Failed to send WhatsApp stop message:', err.message);
+        }
     }
 
     // Wait briefly to ensure messages are dispatched

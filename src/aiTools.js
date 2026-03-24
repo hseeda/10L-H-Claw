@@ -83,6 +83,12 @@ function detectMimeTypeFromPath(filePath) {
   if (ext === ".gif") return "image/gif";
   if (ext === ".bmp") return "image/bmp";
   if (ext === ".svg") return "image/svg+xml";
+  if (ext === ".mp3") return "audio/mpeg";
+  if (ext === ".wav") return "audio/wav";
+  if (ext === ".ogg" || ext === ".oga") return "audio/ogg";
+  if (ext === ".m4a") return "audio/mp4";
+  if (ext === ".aac") return "audio/aac";
+  if (ext === ".flac") return "audio/flac";
   if (ext === ".pdf") return "application/pdf";
   if (ext === ".txt" || ext === ".md") return "text/plain";
   return "application/octet-stream";
@@ -108,7 +114,7 @@ async function analyzeLocalMediaFile(filePath, mimeType = "") {
   }
 
   if (activeModelProvider === "openai" || activeModelProvider === "chatgpt") {
-    const prompt = "Describe this file in explicit detail. Omit talk.";
+    const prompt = "Describe this file in detail.";
 
     if (resolvedMimeType.startsWith("image/")) {
         const base64Image = fs.readFileSync(filePath, { encoding: 'base64' });
@@ -827,7 +833,7 @@ async function executeTool(name, args, client = null, platform = 'whatsapp') {
           activeModelProvider === "openai" ||
           activeModelProvider === "chatgpt"
         ) {
-          const prompt = "Describe this file in explicit detail. Omit talk.";
+          const prompt = "Describe this file in detail.";
 
           if (media.mimetype.startsWith("image/")) {
               const currentModel = getActiveModel().model;
@@ -1045,11 +1051,12 @@ FileUri: ${uploadResult.uri}`;
 
     if (name === "telegram_read_media") {
         try {
+            if (!resolvedChatId) return "❌ Telegram Error: current chat_id is unavailable.";
             // 1. Get update history to find the media file info
-            const updates = await telegram.getTelegramUpdates();
+            const updates = await telegram.getTelegramUpdates(0, 100, 0);
             const update = updates.result.find(u => {
                 const msg = u.message || u.edited_message || u.channel_post;
-                return msg && String(msg.message_id) === String(args.message_id) && String(msg.chat.id) === String(args.chat_id);
+                return msg && String(msg.message_id) === String(args.message_id) && String(msg.chat.id) === String(resolvedChatId);
             });
 
             if (!update) return "❌ Message not found in recent history. Cannot download.";
@@ -1106,7 +1113,7 @@ FileUri: ${uploadResult.uri}`;
                     messages: [{
                         role: "user",
                         content: [
-                            { type: "text", text: "Describe this file in explicit detail. Omit talk." },
+                            { type: "text", text: "Describe this file in detail." },
                             { type: "image_url", image_url: { url: `data:${mimetype};base64,${base64Image}` } }
                         ]
                     }]

@@ -13,7 +13,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Node.js-16%2B-3c873a?style=for-the-badge" alt="Node.js 16+">
+  <img src="https://img.shields.io/badge/Node.js-18%2B-3c873a?style=for-the-badge" alt="Node.js 18+">
   <img src="https://img.shields.io/badge/Clients-WhatsApp%20%7C%20Telegram%20%7C%20OnBoard-1f6feb?style=for-the-badge" alt="Clients">
   <img src="https://img.shields.io/badge/Storage-Local%20Files-f59e0b?style=for-the-badge" alt="Local files">
   <img src="https://img.shields.io/badge/UI-Web%20Dashboard%20%2B%20CLI-8b5cf6?style=for-the-badge" alt="Dashboard and CLI">
@@ -90,8 +90,8 @@ flowchart LR
     SCHED[Scheduler] --> CORE
 
     CORE --> AI[aiHandler.js]
-    AI --> CTX[SOUL.md + TOOLS.md + MEMORY.md]
-    AI --> HB[HEARTBEAT.md when prompt contains heartbeat]
+    AI --> CTX[SOUL.md + MEMORY.md + TOOLS.md within budget]
+    AI --> HB[HEARTBEAT.md when prompt contains _heartbeat_]
     AI --> TOOLS[aiTools.js]
 
     TOOLS --> FS[Filesystem]
@@ -161,7 +161,7 @@ sequenceDiagram
 
     User->>Client: send prompt
     Client->>Core: normalized input
-    Core->>AI: prompt + context + history
+    Core->>AI: prompt + context + recent bot log tail
     AI->>Tools: optional tool calls
     Tools-->>AI: results
     AI-->>Core: final answer
@@ -186,7 +186,7 @@ IMAGE_GENERATION_ORDER=openai:dall-e-3;gemini:gemini-2.0-flash-preview-image-gen
 
 ### 3. Persistent Prompt Context
 
-The bot is not driven by a single hardcoded system prompt. Instead, it composes a context layer from local markdown files.
+The bot is not driven by a single hardcoded system prompt. Instead, it composes a context layer from local markdown files plus a recent tail of `logs/bot_log.txt`.
 
 | File | Role |
 |---|---|
@@ -194,16 +194,20 @@ The bot is not driven by a single hardcoded system prompt. Instead, it composes 
 | `MD/TOOLS.md` | learned workflows and operating recipes |
 | `MD/MEMORY.md` | persistent remembered facts |
 | `MD/HEARTBEAT.md` | special bounded instructions for heartbeat-triggered prompts only |
+| `logs/bot_log.txt` | newest bot activity injected as recent context |
 
 Normal requests always use:
 
 - `SOUL.md`
-- `TOOLS.md`
 - `MEMORY.md`
+- `TOOLS.md`
+- the latest `BOT_LOG_HISTORY_LIMIT` non-empty lines from `logs/bot_log.txt`
 
 Heartbeat requests additionally inject:
 
-- `HEARTBEAT.md` when the prompt contains `heartbeat` in any casing
+- `HEARTBEAT.md` when the prompt contains `_heartbeat_` in any casing
+
+Prompt construction is budgeted in `src/aiHandler.js` so very large markdown files, messages, and tool outputs are trimmed before they reach the model. This is especially important during tool-calling rounds.
 
 ### 4. Memory System
 
@@ -324,6 +328,7 @@ Heartbeat is especially useful for:
 - edits documents and approved secret files
 - previews workspace files, including heartbeat artifacts
 - cleans `tmp/` and heartbeat output directories
+- includes mobile-friendly layout behavior, a hamburger menu on smaller screens, and compact top-bar controls
 
 #### Why it matters
 
@@ -408,7 +413,7 @@ That separation helps keep editing intentional while still making important file
 
 ### Prerequisites
 
-- Node.js 16+
+- Node.js 18+
 - at least one AI provider key
 - WhatsApp account for `whatsapp-web.js`
 - optional Telegram bot token and chat ID
@@ -429,7 +434,7 @@ Copy and edit:
 cp secrets/.env.example secrets/.env
 ```
 
-Common variables:
+Core variables in `secrets/.env`:
 
 ```env
 GEMINI_API_KEY=...
@@ -438,6 +443,15 @@ AI_FALLBACK_ORDER=gemini:gemini-3-flash-preview,chatgpt:gpt-4o
 IMAGE_GENERATION_ORDER=openai:dall-e-3;gemini:gemini-2.0-flash-preview-image-generation
 TELEGRAM_BOT_TOKEN=...
 TELEGRAM_CHAT_ID=...
+```
+
+Runtime tuning in `secrets/.env_bot`:
+
+```env
+BOT_LOG_HISTORY_LIMIT=50
+MAX_TOOL_CALLS=15
+DEFAULT_BOT_MODEL=1
+DEFAULT_IMAGE_MODEL=1
 ```
 
 ### Run the Main Bot
@@ -457,6 +471,8 @@ Then open:
 ```text
 http://localhost:3000
 ```
+
+If you access OnBoard remotely, put it behind SSH tunneling or a reverse proxy with authentication. The current admin surface is powerful and should not be exposed publicly without protection.
 
 ### Run the CLI
 
@@ -484,6 +500,7 @@ npm run cli
 
 1. Ensure `MD/HEARTBEAT.md` has the workflow you want.
 2. Send a prompt containing `heartbeat`.
+   Use `_heartbeat_` if you want to guarantee the heartbeat instruction file is injected.
 3. Review generated files in `heartbeat/`.
 
 ### Edit Core Context
@@ -525,6 +542,14 @@ These are handled locally without needing full model inference.
 | `/delete schedule` | delete all schedules |
 | `/stop` | stop the bot |
 
+## Prompt and Token Behavior
+
+- The runtime injects `SOUL.md`, `MEMORY.md`, `TOOLS.md`, and optionally `HEARTBEAT.md`.
+- The runtime also injects the latest tail of `logs/bot_log.txt`, controlled by `BOT_LOG_HISTORY_LIMIT` in `secrets/.env_bot`.
+- Platform chat transcripts are not injected into the model prompt by default.
+- Prompt sections are hard-limited in `src/aiHandler.js` so model tool loops do not grow unbounded.
+- `MAX_TOOL_CALLS` in `secrets/.env_bot` limits tool-calling rounds per request.
+
 ## Security and Operational Notes
 
 - secrets should stay in `secrets/` and remain uncommitted
@@ -532,6 +557,7 @@ These are handled locally without needing full model inference.
 - memory and tools are local files, so they are inspectable
 - heartbeat can be bounded by its own instructions
 - scheduler state is persistent because it lives in `MD/SCHEDULE.json`
+- OnBoard currently has no built-in authentication layer; secure it before remote exposure
 
 ## Why the Design Works
 

@@ -217,6 +217,24 @@ try {
     queueReadOffset = 0;
 }
 
+async function compactConsumedQueue(currentSize) {
+    const consumedSize = Number(currentSize);
+    if (!Number.isFinite(consumedSize) || consumedSize <= 0) return false;
+
+    try {
+        const latestStats = await fs.promises.stat(queueFile);
+        if (latestStats.size !== consumedSize || queueReadOffset !== consumedSize) {
+            return false;
+        }
+
+        await fs.promises.truncate(queueFile, 0);
+        queueReadOffset = 0;
+        return true;
+    } catch (error) {
+        return false;
+    }
+}
+
 function writePidFile() {
     try {
         fs.mkdirSync(path.dirname(pidFile), { recursive: true });
@@ -258,6 +276,9 @@ async function handleSettingsUpdate(settings) {
     const s = settings || {};
     if (s.historyLimit !== undefined) {
         process.env.BOT_LOG_HISTORY_LIMIT = s.historyLimit;
+    }
+    if (s.maxToolCalls !== undefined) {
+        process.env.MAX_TOOL_CALLS = s.maxToolCalls;
     }
     if (s.defaultBotModel !== undefined) {
         try {
@@ -373,7 +394,18 @@ async function processQueuedCommands() {
     try {
         if (!fs.existsSync(queueFile)) return false;
         const stats = fs.statSync(queueFile);
-        if (stats.size <= queueReadOffset) return false;
+        if (stats.size === 0) {
+            queueReadOffset = 0;
+            return false;
+        }
+        if (stats.size === queueReadOffset) {
+            await compactConsumedQueue(stats.size);
+            return false;
+        }
+        if (stats.size < queueReadOffset) {
+            queueReadOffset = 0;
+            return false;
+        }
 
         const handle = await fs.promises.open(queueFile, 'r');
         try {
@@ -395,6 +427,7 @@ async function processQueuedCommands() {
                     console.error('Queue payload error:', error.message);
                 }
             }
+            await compactConsumedQueue(stats.size);
             return lines.length > 0;
         } finally {
             await handle.close();

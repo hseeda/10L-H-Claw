@@ -363,10 +363,10 @@ function getTokenUsageSummary(options = {}) {
     explodedRows.forEach((row) => {
         const bucketKey = groupBy === 'period'
             ? row.period
-            : `${row.period}::${groupBy === 'provider' ? row.provider : groupBy === 'platform' ? row.platform : row.model}`;
+            : (groupBy === 'provider' ? row.provider : groupBy === 'platform' ? row.platform : row.model);
         if (!buckets[bucketKey]) {
             buckets[bucketKey] = {
-                period: row.period,
+                period: groupBy === 'period' ? row.period : period,
                 model: groupBy === 'model' ? row.model : row.model,
                 provider: groupBy === 'provider' ? row.provider : row.provider,
                 platform: groupBy === 'platform' ? row.platform : row.platform,

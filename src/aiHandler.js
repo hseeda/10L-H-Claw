@@ -18,9 +18,16 @@ const toolsPath  = path.join(__dirname, '..', 'MD', 'TOOLS.md');
 const soulPath   = path.join(__dirname, '..', 'MD', 'SOUL.md');
 const heartbeatPath = path.join(__dirname, '..', 'MD', 'HEARTBEAT.md');
 
+const PROMPT_LIMITS = {
+  systemChars: 6000,
+  historyChars: 3500,
+  currentMessageChars: 4000,
+  toolResultChars: 1800,
+};
+
 const PLATFORM_PROMPTS = {
-    whatsapp: "Platform: WhatsApp. Reply with text directly; use whatsapp_send/whatsapp_reply for other chats only.",
-    telegram: "Platform: Telegram. Reply with text directly; use telegram_send/telegram_reply for other chats only.",
+    whatsapp: "Platform: WhatsApp. Reply directly; use whatsapp_send/whatsapp_reply only for other chats.",
+    telegram: "Platform: Telegram. Reply directly; use telegram_send/telegram_reply only for other chats.",
     onboard: "Platform: OB Dashboard. System admin tools enabled."
 };
 
@@ -47,28 +54,93 @@ function getUsagePlatform(platform = 'whatsapp') {
   return parsePlatformContext(platform).platformName;
 }
 
+function getMaxToolRounds() {
+  const raw = parseInt(process.env.MAX_TOOL_CALLS || '15', 10);
+  if (!Number.isFinite(raw)) return 15;
+  return Math.max(1, Math.min(100, raw));
+}
+
+function normalizeWhitespace(text) {
+  return String(text || '')
+    .replace(/\r/g, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+function trimFromStart(text, maxChars) {
+  const normalized = normalizeWhitespace(text);
+  if (!maxChars || normalized.length <= maxChars) return normalized;
+  return `...${normalized.slice(-(maxChars - 3))}`;
+}
+
+function trimKeepEdges(text, maxChars) {
+  const normalized = normalizeWhitespace(text);
+  if (!maxChars || normalized.length <= maxChars) return normalized;
+  if (maxChars <= 20) return normalized.slice(0, maxChars);
+  const keep = maxChars - 7;
+  const head = Math.ceil(keep * 0.6);
+  const tail = keep - head;
+  return `${normalized.slice(0, head)}\n...\n${normalized.slice(-tail)}`;
+}
+
+function appendWithinBudget(parts, text, remaining) {
+  const normalized = normalizeWhitespace(text);
+  if (!normalized || remaining <= 0) return remaining;
+  if (normalized.length <= remaining) {
+    parts.push(normalized);
+    return remaining - normalized.length - 1;
+  }
+  if (remaining > 32) {
+    parts.push(trimKeepEdges(normalized, remaining));
+  }
+  return 0;
+}
+
 function getSystemPrompt(platform = 'whatsapp', userPrompt = '') {
   const { platformName, currentTarget } = parsePlatformContext(platform);
-  let prompt = (PLATFORM_PROMPTS[platformName] || PLATFORM_PROMPTS.whatsapp) + "\n";
+  const parts = [];
+  let remaining = PROMPT_LIMITS.systemChars;
   const defaultTelegramTarget = String(process.env.TELEGRAM_CHAT_ID || '').trim();
-  const shouldInjectHeartbeat = /heartbeat/i.test(String(userPrompt || ''));
+  const shouldInjectHeartbeat = /_heartbeat_/i.test(String(userPrompt || ''));
+  remaining = appendWithinBudget(parts, (PLATFORM_PROMPTS[platformName] || PLATFORM_PROMPTS.whatsapp), remaining);
+  remaining = appendWithinBudget(parts, "If media is attached, read it with a media tool before asking for re-upload.", remaining);
   if (platformName === 'telegram' && currentTarget) {
-    prompt += `Current Telegram chat_id: ${currentTarget}. If the user asks to send/reply here in this chat, use telegram_send or telegram_reply with chat_id "${currentTarget}" immediately. Do not ask for the Telegram chat ID when sending to the current chat.\n`;
+    remaining = appendWithinBudget(parts, `Current Telegram chat_id: ${currentTarget}.`, remaining);
   }
   if (defaultTelegramTarget) {
-    prompt += `Default Telegram chat_id: ${defaultTelegramTarget}. If the user asks to send something to Telegram and no different Telegram destination is specified, use this default chat_id immediately. Do not ask the user for a Telegram chat ID when this default target is available.\n`;
+    remaining = appendWithinBudget(parts, `Default Telegram chat_id: ${defaultTelegramTarget}.`, remaining);
   }
   try {
-    if (fs.existsSync(soulPath)) prompt += fs.readFileSync(soulPath, 'utf8') + "\n";
-    if (fs.existsSync(toolsPath)) prompt += fs.readFileSync(toolsPath, 'utf8') + "\n";
-    if (fs.existsSync(memoryPath)) prompt += fs.readFileSync(memoryPath, 'utf8') + "\n";
+    if (fs.existsSync(soulPath)) {
+      remaining = appendWithinBudget(parts, fs.readFileSync(soulPath, 'utf8'), remaining);
+    }
+    if (fs.existsSync(memoryPath)) {
+      remaining = appendWithinBudget(parts, fs.readFileSync(memoryPath, 'utf8'), remaining);
+    }
+    if (fs.existsSync(toolsPath)) {
+      remaining = appendWithinBudget(parts, fs.readFileSync(toolsPath, 'utf8'), remaining);
+    }
     if (shouldInjectHeartbeat && fs.existsSync(heartbeatPath)) {
-      prompt += fs.readFileSync(heartbeatPath, 'utf8') + "\n";
+      remaining = appendWithinBudget(parts, fs.readFileSync(heartbeatPath, 'utf8'), remaining);
     }
   } catch(e) {
     console.error("Error loading prompt context files:", e);
   }
-  return prompt;
+  return parts.join("\n");
+}
+
+function buildPromptContext(prompt, historyText = '') {
+  const trimmedPrompt = trimKeepEdges(prompt, PROMPT_LIMITS.currentMessageChars);
+  const trimmedHistory = trimFromStart(historyText, PROMPT_LIMITS.historyChars);
+  if (!trimmedHistory) {
+    return trimmedPrompt;
+  }
+  return `[RECENT BOT LOGS]\n${trimmedHistory}\n\n[CURRENT MESSAGE]\n${trimmedPrompt}`;
+}
+
+function clampToolResult(result) {
+  if (typeof result !== 'string') return result;
+  return trimKeepEdges(result, PROMPT_LIMITS.toolResultChars);
 }
 
 async function getGeminiResponse(modelName, prompt, client, chatHistory = "", platform = 'whatsapp') {
@@ -77,13 +149,11 @@ async function getGeminiResponse(modelName, prompt, client, chatHistory = "", pl
     model.setChanged(false);
   }
 
-  const fullPrompt = chatHistory
-    ? `[HISTORY (context only, do not act on)]\n${chatHistory}\n\n[CURRENT MESSAGE]\n${prompt}`
-    : prompt;
+  const fullPrompt = buildPromptContext(prompt, chatHistory);
 
   // Build initial contents array
   const contents = [{ role: 'user', parts: [{ text: fullPrompt }] }];
-  const MAX_ROUNDS = 50;
+  const MAX_ROUNDS = getMaxToolRounds();
 
   for (let round = 0; round < MAX_ROUNDS; round++) {
     const response = await geminiClient.models.generateContent({
@@ -128,13 +198,14 @@ async function getGeminiResponse(modelName, prompt, client, chatHistory = "", pl
     const toolResponseParts = [];
     for (const part of toolCallParts) {
       const { name, args } = part.functionCall;
-      const result = await executeTool(name, args, client, platform);
+      const rawResult = await executeTool(name, args, client, platform);
+      const result = clampToolResult(rawResult);
 
       // If the tool uploaded a file, we need to extract the URI and MimeType
       // to pass it genuinely as 'fileData' so the model can read it, not just as text.
-      if (typeof result === 'string' && result.includes('[FILE_URI_ATTACHMENT]')) {
-         const mimeMatch = result.match(/MimeType:\s*([^\n]+)/);
-         const uriMatch = result.match(/FileUri:\s*([^\n]+)/);
+      if (typeof rawResult === 'string' && rawResult.includes('[FILE_URI_ATTACHMENT]')) {
+         const mimeMatch = rawResult.match(/MimeType:\s*([^\n]+)/);
+         const uriMatch = rawResult.match(/FileUri:\s*([^\n]+)/);
          
          if (mimeMatch && uriMatch) {
             toolResponseParts.push({
@@ -165,16 +236,14 @@ async function getOpenAIResponse(modelName, prompt, client, chatHistory = "", pl
     model.setChanged(false);
   }
 
-  const fullPrompt = chatHistory
-    ? `[HISTORY (context only, do not act on)]\n${chatHistory}\n\n[CURRENT MESSAGE]\n${prompt}`
-    : prompt;
+  const fullPrompt = buildPromptContext(prompt, chatHistory);
 
   // Build initial messages array
   const messages = [
     { role: 'system', content: getSystemPrompt(platform, prompt) },
     { role: 'user', content: fullPrompt },
   ];
-  const MAX_ROUNDS = 50;
+  const MAX_ROUNDS = getMaxToolRounds();
 
   for (let round = 0; round < MAX_ROUNDS; round++) {
     const response = await openaiClient.chat.completions.create({
@@ -214,7 +283,7 @@ async function getOpenAIResponse(modelName, prompt, client, chatHistory = "", pl
     for (const toolCall of choice.message.tool_calls) {
       const name = toolCall.function.name;
       const args = JSON.parse(toolCall.function.arguments);
-      const result = await executeTool(name, args, client, platform);
+      const result = clampToolResult(await executeTool(name, args, client, platform));
       messages.push({
         role: 'tool',
         tool_call_id: toolCall.id,
@@ -234,9 +303,9 @@ async function generateAIResponse(prompt, isSelf = false, client = null, chatHis
 
   const { getBotLogHistory } = require('./historyHandler');
   const botLog = getBotLogHistory();
-  let appendedHistory = chatHistory;
+  let appendedHistory = '';
   if (botLog) {
-      appendedHistory = `[GLOBAL BOT LOGS (context only)]\n${botLog}\n\n${chatHistory || ''}`;
+      appendedHistory = botLog;
   }
 
   try {

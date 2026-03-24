@@ -662,7 +662,7 @@ async function initializeTelegramClient(whatsappClient = null) {
                     // If media was received, construct an enriched prompt
                     let prompt = msg.text || '';
                     if (mediaInfo) {
-                        prompt += `\n[MEDIA ATTACHED: ${mediaInfo.type} at ${mediaInfo.path}]`;
+                        prompt += `\n[MEDIA: use read_local_media("${mediaInfo.path}") for this ${mediaInfo.type}; fallback telegram_read_media(${msg.message_id}, ${chatId}).]`;
                     }
 
                     const { generateAIResponse } = require('./aiHandler');
