@@ -103,43 +103,6 @@ flowchart LR
     AI --> REPLY[Client reply]
 ```
 
-### Component Diagram
-
-<p align="center">
-  <img src="assets/architecture.png" alt="H-Claw architecture diagram">
-</p>
-
-### Project Layout
-
-```text
-10L-H-Claw/
-├── hclaw.js
-├── hclaw-onboard.js
-├── hclaw-cli.js
-├── src/
-│   ├── aiHandler.js
-│   ├── aiTools.js
-│   ├── Models.js
-│   ├── whatsappClient.js
-│   ├── telegramClient.js
-│   ├── onboardClient.js
-│   ├── scheduleTool.js
-│   ├── loggerTool.js
-│   ├── mailTools.js
-│   └── ...
-├── MD/
-│   ├── SOUL.md
-│   ├── TOOLS.md
-│   ├── MEMORY.md
-│   ├── HEARTBEAT.md
-│   └── SCHEDULE.json
-├── heartbeat/
-├── logs/
-├── secrets/
-├── assets/
-└── tmp/
-```
-
 ## Core Features
 
 ### 1. Multi-Client Conversation Layer
@@ -272,17 +235,16 @@ Run-once tasks are represented as:
 #### Scheduling Lifecycle
 
 ```mermaid
-flowchart TD
-    A[Load SCHEDULE.json] --> B{Task enabled?}
-    B -- No --> X[Keep as disabled]
+flowchart LR
+    A[Load schedule] --> B{Enabled?}
+    B -- No --> X[Keep disabled]
     B -- Yes --> C{Expired?}
     C -- Yes --> Y[Mark expired]
-    C -- No --> D[Compute next_run_time]
-    D --> E{Due now or past?}
-    E -- No --> F[Wait for next poll]
-    E -- Yes --> G[Advance next_run_time]
-    G --> H[Inject task prompt into bot]
-    H --> I[Send reply to issuer client]
+    C -- No --> D[Set next run]
+    D --> E{Due?}
+    E -- No --> F[Wait]
+    E -- Yes --> G[Run task]
+    G --> H[Send reply]
 ```
 
 ### 7. Heartbeat Workflow
