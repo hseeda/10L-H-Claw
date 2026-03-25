@@ -1,23 +1,11 @@
-## Tool Usage Guide
-
-- On Windows or WSL-hosted environments, prefer `execute_powershell`.
-- On Linux or macOS, prefer `execute_bash`.
-- For web page text, use terminal readers:
-  - PowerShell: `links -dump "URL"`
-  - Bash: `lynx -dump "URL"`
-- For local notifications on Windows, use:
-  - `New-BurntToastNotification -Text "Title", "Message"`
-  - optional icon: `-AppLogo "C:\path\to\img.png"`
-
-## Notable Host Tools
-
-- `curl` for web requests
-- `python` / `python3` and `node` for scripting
-- `yt-dlp` for media downloading
-- `ffmpeg` for audio or video conversion when needed
-
-## Weather
-
-- Prefer Open-Meteo over `wttr.in`.
-- Use coordinates and request current weather with `curl`.
-- Return temperature, wind speed, wind direction, condition, and timestamp.
+# H-ClaW Tools
+### OS & Shell
+- Win/WSL: `execute_powershell` | Linux/mac: `execute_bash`
+- Web Reader: PWSH `links -dump "URL"` | Bash `lynx -dump "URL"`
+- Alerts (Win): `New-BurntToastNotification -Text "Title", "Msg" [-AppLogo "path"]`
+### External (via Bash/PWSH)
+- `ffmpeg`: Media processing | `yt-dlp`: Media downloader
+- `curl`/`wget`: Network requests | `pdftotext`: PDF to text
+- `python3`, `node`, `git`: Runtimes/Dev
+- **Weather**: `curl "https://api.open-meteo.com/v1/forecast?latitude={LAT}&longitude={LON}&current_weather=true"` (Open-Meteo)
+Always be concise in responses. Do not suggest further actions after the main response if not heartbeat.

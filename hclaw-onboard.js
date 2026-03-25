@@ -5,12 +5,13 @@ const path = require('path');
 const { getScheduledTasks, getStoredScheduledTasks, createSchedule, updateSchedule, deleteSchedule } = require('./src/scheduleTool');
 const { getTokenUsageSummary, clearTokenUsageHistory } = require('./src/tokenUsageStore');
 const oldLog = console.log;
-console.log = () => {}; // Suppress dotenv tip/verbose output
+console.log = () => { }; // Suppress dotenv tip/verbose output
 require('dotenv').config({ path: path.join('secrets', '.env'), quiet: true });
 require('dotenv').config({ path: path.join('secrets', '.env_bot'), override: true, quiet: true });
 console.log = oldLog;
 
-const PORT = Number(process.env.PORT) || 3000;
+const PORT = Number(process.env.PORT) || 8080;
+const BIND_HOST = process.env.BIND_HOST || '0.0.0.0';
 const logFile = path.join('logs', 'log.txt');
 const botLogFile = path.join('logs', 'bot_log.txt');
 
@@ -37,8 +38,10 @@ const editableSecretFiles = [
     { label: 'mail_accounts.json.example', path: 'secrets/mail_accounts.json.example' },
 ];
 const LOG_FILEPATH_REGEX = String.raw`(?:[a-zA-Z]:\\[^\n\)\`\'\"]*?\.[a-zA-Z0-9]{1,10})|(?:(?<=^)|(?<=[^a-zA-Z0-9]))(\./[^ \n\)\`\'\"]*?\.[a-zA-Z0-9]{1,10})|(?:(?<=^)|(?<=[^a-zA-Z0-9]))(/[^ \n\)\`\'\"]*?\.[a-zA-Z0-9]{1,10})\b|(?:\b|(?<=\s))([\w.-]+(?:[ ][\w.-]+)*(?:[\/\\][\w.-]+(?:[ ][\w.-]+)*)*\.[a-zA-Z0-9]{1,10})\b`;
-const MAX_LOG_VIEW_LINES = 400;
-const MAX_LOG_VIEW_CHARS = 120000;
+const MAX_LOG_VIEW_LINES = 200;
+const MAX_LOG_VIEW_CHARS = 40000;
+const MAX_LOG_RESPONSE_BYTES = 49152;
+const MAX_LOG_READ_BYTES = Math.max(MAX_LOG_RESPONSE_BYTES * 2, 131072);
 let botProcess = null;
 let botPid = null;
 let startInFlight = false;
@@ -299,22 +302,33 @@ async function restartBot() {
     await startBot();
 }
 
-async function readSystemLog() {
+async function readLogTail(filePath, maxBytes = MAX_LOG_READ_BYTES) {
     try {
-        return await fs.promises.readFile(logFile, 'utf8');
+        const handle = await fs.promises.open(filePath, 'r');
+        try {
+            const stats = await handle.stat();
+            if (!stats.size) return '';
+
+            const bytesToRead = Math.min(stats.size, maxBytes);
+            const start = Math.max(0, stats.size - bytesToRead);
+            const buffer = Buffer.alloc(bytesToRead);
+            const { bytesRead } = await handle.read(buffer, 0, bytesToRead, start);
+            return buffer.toString('utf8', 0, bytesRead);
+        } finally {
+            await handle.close();
+        }
     } catch (error) {
         if (error && error.code === 'ENOENT') return '';
         throw error;
     }
 }
 
+async function readSystemLog() {
+    return readLogTail(logFile);
+}
+
 async function readBotLog() {
-    try {
-        return await fs.promises.readFile(botLogFile, 'utf8');
-    } catch (error) {
-        if (error && error.code === 'ENOENT') return '';
-        throw error;
-    }
+    return readLogTail(botLogFile);
 }
 
 async function clearFile(filePath) {
@@ -463,8 +477,33 @@ function trimLogForUi(content) {
         wasTrimmed = true;
     }
 
+    let bodyBuffer = Buffer.from(trimmed, 'utf8');
+    if (bodyBuffer.length > MAX_LOG_RESPONSE_BYTES) {
+        let byteTrimmed = bodyBuffer.slice(-MAX_LOG_RESPONSE_BYTES).toString('utf8');
+        const firstNewline = byteTrimmed.indexOf('\n');
+        if (firstNewline !== -1) {
+            byteTrimmed = byteTrimmed.slice(firstNewline + 1);
+        }
+        trimmed = byteTrimmed;
+        wasTrimmed = true;
+    }
+
     if (!wasTrimmed) return trimmed;
-    return `[UI] Showing the most recent ${MAX_LOG_VIEW_LINES} lines / ${MAX_LOG_VIEW_CHARS} characters.\n${trimmed}`;
+    return `[UI] Showing the most recent ${MAX_LOG_VIEW_LINES} lines / ${MAX_LOG_VIEW_CHARS} characters / ${MAX_LOG_RESPONSE_BYTES} bytes.\n${trimmed}`;
+}
+
+function sendPlainText(res, statusCode, content) {
+    const body = String(content || '');
+    const bodyBuffer = Buffer.from(body, 'utf8');
+    res.writeHead(statusCode, {
+        'Content-Type': 'text/plain; charset=utf-8',
+        'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0',
+        'Pragma': 'no-cache',
+        'Expires': '0',
+        'Content-Length': bodyBuffer.length,
+        'Connection': 'close'
+    });
+    res.end(bodyBuffer);
 }
 
 function resolveWorkspaceFilePath(fileParam) {
@@ -2536,27 +2575,57 @@ const html = `<!DOCTYPE html>
             }
         }
 
+        let systemLogRequestInFlight = null;
+        let systemLogPollTimer = null;
+
         async function loadSystemLog() {
             if (activeView !== 'system') return;
             if (document.activeElement === systemChatLog) return;
+            if (systemLogRequestInFlight) return systemLogRequestInFlight;
 
-            try {
-                const response = await fetch('/api/system-log?source=' + encodeURIComponent(activeConversationSource), { cache: 'no-store' });
-                const text = await response.text();
-                if (text === lastLogText) return;
+            systemLogRequestInFlight = (async () => {
+                try {
+                    const requestUrl = '/api/system-log?source=' + encodeURIComponent(activeConversationSource) + '&_ts=' + Date.now();
+                    const response = await fetch(requestUrl, {
+                        cache: 'no-store',
+                        headers: {
+                            'Cache-Control': 'no-cache, no-store, max-age=0',
+                            'Pragma': 'no-cache'
+                        }
+                    });
+                    const text = await response.text();
+                    if (text === lastLogText) return;
 
-                const stickToBottom = isNearBottom(systemChatLog) || !lastLogText;
-                lastLogText = text;
-                systemChatLog.innerHTML = formatTextAsHtml(text);
-                updateGutter('system', text);
-                syncGutterHeights('system');
+                    const stickToBottom = isNearBottom(systemChatLog) || !lastLogText;
+                    lastLogText = text;
+                    systemChatLog.innerHTML = formatTextAsHtml(text);
+                    updateGutter('system', text);
+                    syncGutterHeights('system');
 
-                if (stickToBottom) {
-                    systemChatLog.scrollTop = systemChatLog.scrollHeight;
+                    if (stickToBottom) {
+                        systemChatLog.scrollTop = systemChatLog.scrollHeight;
+                    }
+                    syncGutter('system');
+                } catch (error) {
+                } finally {
+                    systemLogRequestInFlight = null;
                 }
-                syncGutter('system');
-            } catch (error) {
+            })();
+
+            return systemLogRequestInFlight;
+        }
+
+        function startSystemLogPolling() {
+            if (systemLogPollTimer) {
+                clearTimeout(systemLogPollTimer);
             }
+
+            const tick = async () => {
+                await loadSystemLog();
+                systemLogPollTimer = window.setTimeout(tick, 1500);
+            };
+
+            systemLogPollTimer = window.setTimeout(tick, 1500);
         }
 
         function setActiveView(view) {
@@ -3645,7 +3714,7 @@ const html = `<!DOCTYPE html>
             syncGutterHeights('bot');
         });
         window.setInterval(loadStatus, 2000);
-        window.setInterval(loadSystemLog, 1500);
+        startSystemLogPolling();
         window.setInterval(loadBotLog, 1500);
         loadComposerHistory();
         renderComposerHistoryList();
@@ -3660,6 +3729,30 @@ const html = `<!DOCTYPE html>
 </body>
 </html>
 `;
+
+const MAX_POST_BODY = 24 * 1024 * 1024; // 24 MB – covers base64-encoded media uploads
+
+function collectBody(req, res, maxBytes = MAX_POST_BODY) {
+    return new Promise((resolve, reject) => {
+        let body = '';
+        let size = 0;
+        req.on('data', (chunk) => {
+            size += chunk.length;
+            if (size > maxBytes) {
+                req.destroy();
+                if (!res.headersSent) {
+                    res.writeHead(413, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ success: false, error: 'Request body too large.' }));
+                }
+                reject(Object.assign(new Error('body_too_large'), { bodyTooLarge: true }));
+            } else {
+                body += chunk;
+            }
+        });
+        req.on('end', () => resolve(body));
+        req.on('error', reject);
+    });
+}
 
 const server = http.createServer((req, res) => {
     const { url, method } = req;
@@ -3698,22 +3791,18 @@ const server = http.createServer((req, res) => {
         const contentPromise = source === 'system' ? readSystemLog() : buildFilteredLog(source);
 
         contentPromise.then((content) => {
-            res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' });
-            res.end(trimLogForUi(content));
+            sendPlainText(res, 200, trimLogForUi(content));
         }).catch(() => {
-            res.writeHead(500, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' });
-            res.end('');
+            sendPlainText(res, 500, '');
         });
         return;
     }
 
     if (pathname === '/api/bot-log' && method === 'GET') {
         readBotLog().then((content) => {
-            res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' });
-            res.end(trimLogForUi(content));
+            sendPlainText(res, 200, trimLogForUi(content));
         }).catch(() => {
-            res.writeHead(500, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' });
-            res.end('');
+            sendPlainText(res, 500, '');
         });
         return;
     }
@@ -3784,11 +3873,7 @@ const server = http.createServer((req, res) => {
     }
 
     if (pathname === '/api/settings' && method === 'POST') {
-        let body = '';
-        req.on('data', (chunk) => {
-            body += chunk;
-        });
-        req.on('end', () => {
+        collectBody(req, res).then((body) => {
             try {
                 const payload = JSON.parse(body || '{}');
                 const envBotPath = path.join('secrets', '.env_bot');
@@ -3827,17 +3912,17 @@ const server = http.createServer((req, res) => {
                 res.writeHead(500, { 'Content-Type': 'application/json' });
                 res.end(JSON.stringify({ success: false }));
             }
+        }).catch((e) => {
+            if (e && e.bodyTooLarge) return;
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: false }));
         });
         return;
     }
 
     if (pathname === '/api/send' && method === 'POST') {
-        let body = '';
-        req.on('data', (chunk) => {
-            body += chunk;
-        });
-        req.on('end', async () => {
-                let mediaPath = '';
+        collectBody(req, res).then(async (body) => {
+            let mediaPath = '';
 
             try {
                 const payload = JSON.parse(body || '{}');
@@ -3908,6 +3993,10 @@ const server = http.createServer((req, res) => {
                 res.writeHead(200, { 'Content-Type': 'application/json' });
                 res.end(JSON.stringify({ success: false, error: error.message || 'Failed to send message.' }));
             }
+        }).catch((e) => {
+            if (e && e.bodyTooLarge) return;
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: false, error: 'Failed to process request.' }));
         });
         return;
     }
@@ -3967,9 +4056,7 @@ const server = http.createServer((req, res) => {
     }
 
     if (pathname === '/api/md-file' && method === 'POST') {
-        let body = '';
-        req.on('data', chunk => body += chunk);
-        req.on('end', () => {
+        collectBody(req, res).then((body) => {
             try {
                 const payload = JSON.parse(body || '{}');
                 const filePathParam = payload.path;
@@ -3991,6 +4078,10 @@ const server = http.createServer((req, res) => {
                 res.writeHead(500, { 'Content-Type': 'application/json' });
                 res.end(JSON.stringify({ success: false }));
             }
+        }).catch((e) => {
+            if (e && e.bodyTooLarge) return;
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: false }));
         });
         return;
     }
@@ -4042,7 +4133,7 @@ const server = http.createServer((req, res) => {
         const isAudio = ['.mp3', '.wav', '.ogg', '.m4a'].includes(ext);
         const wholePreview = String(fileParam || '').replace(/\\/g, '/').startsWith('heartbeat/');
         const promise = (isImage || isAudio) ? fs.promises.readFile(fullPath) : fs.promises.readFile(fullPath, 'utf8');
-        
+
         promise.then(data => {
             res.writeHead(200, { 'Content-Type': 'application/json' });
             if (isImage) {
@@ -4153,9 +4244,7 @@ const server = http.createServer((req, res) => {
     }
 
     if (pathname === '/api/schedules' && method === 'POST') {
-        let body = '';
-        req.on('data', chunk => body += chunk);
-        req.on('end', () => {
+        collectBody(req, res).then((body) => {
             try {
                 const payload = JSON.parse(body || '{}');
                 const task = createSchedule({
@@ -4169,6 +4258,10 @@ const server = http.createServer((req, res) => {
                 res.writeHead(400, { 'Content-Type': 'application/json' });
                 res.end(JSON.stringify({ success: false, error: e.message }));
             }
+        }).catch((e) => {
+            if (e && e.bodyTooLarge) return;
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: false, error: 'Failed to process request.' }));
         });
         return;
     }
@@ -4188,9 +4281,7 @@ const server = http.createServer((req, res) => {
 
     if (pathname.startsWith('/api/schedules/') && method === 'PUT') {
         const pid = decodeURIComponent(pathname.split('/').pop());
-        let body = '';
-        req.on('data', chunk => body += chunk);
-        req.on('end', () => {
+        collectBody(req, res).then((body) => {
             try {
                 const payload = JSON.parse(body || '{}');
                 const task = updateSchedule(pid, {
@@ -4205,6 +4296,10 @@ const server = http.createServer((req, res) => {
                 res.writeHead(400, { 'Content-Type': 'application/json' });
                 res.end(JSON.stringify({ success: false, error: e.message }));
             }
+        }).catch((e) => {
+            if (e && e.bodyTooLarge) return;
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: false, error: 'Failed to process request.' }));
         });
         return;
     }
@@ -4214,6 +4309,31 @@ const server = http.createServer((req, res) => {
     res.end('Not Found');
 });
 
-server.listen(PORT, () => {
-    console.log('H-Claw OnBoard UI is live at http://localhost:' + PORT);
+server.keepAliveTimeout = 30000;
+server.headersTimeout = 30000;
+server.requestTimeout = 30000;
+
+server.on('error', (err) => {
+    if (err.code === 'EADDRINUSE') {
+        console.error(`[OnBoard] Port ${PORT} is already in use.`);
+    } else {
+        console.error('[OnBoard] Server error:', err.message);
+    }
+});
+
+server.on('clientError', (_err, socket) => {
+    if (socket.writable) {
+        socket.end('HTTP/1.1 400 Bad Request\r\n\r\n');
+    } else {
+        socket.destroy();
+    }
+});
+
+process.on('unhandledRejection', (reason) => {
+    console.error('[OnBoard] Unhandled rejection:', reason);
+});
+
+server.listen(PORT, BIND_HOST, () => {
+    const displayHost = BIND_HOST === '0.0.0.0' ? 'localhost' : BIND_HOST;
+    console.log(`H-Claw OnBoard UI is live at http://${displayHost}:${PORT}`);
 });

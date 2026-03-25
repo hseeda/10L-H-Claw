@@ -11,6 +11,17 @@
       "next_run_time": "2026-03-22T18:05",
       "issuer_client": "onboard",
       "issuer_target": "dashboard"
+    },
+    {
+      "pid": "mn4zp6ha",
+      "start": "2026-03-24T21:09",
+      "stop": "2030-03-24T21:09",
+      "step_time": "12h",
+      "prompt": "_heartbeat_",
+      "status": "enabled",
+      "next_run_time": "2026-03-25T21:09",
+      "issuer_client": "onboard",
+      "issuer_target": "dashboard"
     }
   ]
 }
