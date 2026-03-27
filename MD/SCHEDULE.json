@@ -18,8 +18,8 @@
       "stop": "2030-03-24T21:09",
       "step_time": "12h",
       "prompt": "_heartbeat_",
-      "status": "enabled",
-      "next_run_time": "2026-03-25T21:09",
+      "status": "disabled",
+      "next_run_time": "2026-03-27T21:09",
       "issuer_client": "onboard",
       "issuer_target": "dashboard"
     }
