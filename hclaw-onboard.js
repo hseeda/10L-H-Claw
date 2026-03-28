@@ -28,6 +28,8 @@ const queueFile = path.join('tmp', 'onboard_ui_queue.jsonl');
 const tempDir = 'tmp';
 const heartbeatDir = path.join(__dirname, 'heartbeat');
 const onboardStateFile = path.join('public', 'onboard_state.json');
+const memoryFilePath = path.join(__dirname, 'MD', 'MEMORY.md');
+const memoryBackupPath = path.join(__dirname, 'secrets', 'MEMORY.backup.md');
 const botScriptPath = path.resolve(__dirname, 'hclaw.js');
 const isWindows = process.platform === 'win32';
 const LOG_FILEPATH_REGEX = String.raw`(?:[a-zA-Z]:\\[^\n\)\`\'\"]*?\.[a-zA-Z0-9]{1,10})|(?:(?<=^)|(?<=[^a-zA-Z0-9]))(\./[^ \n\)\`\'\"]*?\.[a-zA-Z0-9]{1,10})|(?:(?<=^)|(?<=[^a-zA-Z0-9]))(/[^ \n\)\`\'\"]*?\.[a-zA-Z0-9]{1,10})\b|(?:\b|(?<=\s))([\w.-]+(?:[ ][\w.-]+)*(?:[\/\\][\w.-]+(?:[ ][\w.-]+)*)*\.[a-zA-Z0-9]{1,10})\b`;
@@ -78,6 +80,38 @@ function isEditableFilePath(filePathParam) {
 function isSecretsPath(filePathParam) {
     const filePath = String(filePathParam || '').trim().replace(/\\/g, '/').replace(/^\.\/+/, '');
     return filePath === 'secrets' || filePath.startsWith('secrets/');
+}
+
+function getDefaultMemoryContent() {
+    return 'MEMORY\n';
+}
+
+async function backupMemoryFile() {
+    await fs.promises.mkdir(path.dirname(memoryBackupPath), { recursive: true });
+    let content = getDefaultMemoryContent();
+
+    try {
+        content = await fs.promises.readFile(memoryFilePath, 'utf8');
+    } catch (error) {
+        if (!error || error.code !== 'ENOENT') throw error;
+    }
+
+    await fs.promises.writeFile(memoryBackupPath, content, 'utf8');
+    return { backupPath: 'secrets/MEMORY.backup.md' };
+}
+
+async function restoreMemoryFileFromBackup() {
+    const content = await fs.promises.readFile(memoryBackupPath, 'utf8');
+    await fs.promises.mkdir(path.dirname(memoryFilePath), { recursive: true });
+    await fs.promises.writeFile(memoryFilePath, content, 'utf8');
+    return { restoredPath: 'MD/MEMORY.md', backupPath: 'secrets/MEMORY.backup.md' };
+}
+
+async function clearMemoryFile() {
+    await backupMemoryFile();
+    await fs.promises.mkdir(path.dirname(memoryFilePath), { recursive: true });
+    await fs.promises.writeFile(memoryFilePath, getDefaultMemoryContent(), 'utf8');
+    return { clearedPath: 'MD/MEMORY.md', backupPath: 'secrets/MEMORY.backup.md' };
 }
 
 function isPidAlive(pid) {
@@ -1768,6 +1802,18 @@ const html = `<!DOCTYPE html>
                         <i class="fa-solid fa-floppy-disk" aria-hidden="true"></i>
                         <span>Save</span>
                     </button>
+                    <button class="clean-btn" id="backup-memory-btn" type="button" style="display: none;">
+                        <i class="fa-solid fa-box-archive" aria-hidden="true"></i>
+                        <span>Backup</span>
+                    </button>
+                    <button class="clean-btn" id="restore-memory-btn" type="button" style="display: none;">
+                        <i class="fa-solid fa-rotate-left" aria-hidden="true"></i>
+                        <span>Restore</span>
+                    </button>
+                    <button class="clean-btn" id="clear-memory-btn" type="button" style="display: none;">
+                        <i class="fa-solid fa-eraser" aria-hidden="true"></i>
+                        <span>Clear</span>
+                    </button>
                 </div>
 
                 <div class="chat-stage">
@@ -2042,6 +2088,9 @@ const html = `<!DOCTYPE html>
         const sidebarClearAllLogsBtn = document.getElementById('sidebar-clear-all-logs-btn');
         const mdFileList = document.getElementById('md-file-list');
         const saveMdBtn = document.getElementById('save-md-btn');
+        const backupMemoryBtn = document.getElementById('backup-memory-btn');
+        const restoreMemoryBtn = document.getElementById('restore-memory-btn');
+        const clearMemoryBtn = document.getElementById('clear-memory-btn');
         const editorPane = document.getElementById('editor-pane');
         const editorTextarea = document.getElementById('editor-textarea');
         const historyLimitInput = document.getElementById('history-limit');
@@ -2475,6 +2524,11 @@ const html = `<!DOCTYPE html>
         }
 
         function syncWorkspaceHeader() {
+            const isMemoryEditor = activeView === 'editor' && activeMdFile === 'MD/MEMORY.md';
+            backupMemoryBtn.style.display = isMemoryEditor ? 'inline-flex' : 'none';
+            restoreMemoryBtn.style.display = isMemoryEditor ? 'inline-flex' : 'none';
+            clearMemoryBtn.style.display = isMemoryEditor ? 'inline-flex' : 'none';
+
             if (activeView === 'settings') {
                 workspaceTitle.textContent = 'Settings';
                 workspaceIcon.className = 'fa-solid fa-sliders';
@@ -2999,6 +3053,41 @@ const html = `<!DOCTYPE html>
                 alert('Save failed');
             }
             saveMdBtn.disabled = false;
+        }
+
+        async function runMemoryAction(action, options = {}) {
+            if (activeMdFile !== 'MD/MEMORY.md') return;
+
+            const buttonMap = {
+                backup: backupMemoryBtn,
+                restore: restoreMemoryBtn,
+                clear: clearMemoryBtn
+            };
+            const button = buttonMap[action];
+            if (!button) return;
+
+            const confirmMessage = options.confirmMessage || '';
+            if (confirmMessage && !window.confirm(confirmMessage)) return;
+
+            button.disabled = true;
+            try {
+                const response = await fetch('/api/memory/' + encodeURIComponent(action), { method: 'POST' });
+                const result = await response.json();
+                if (!result.success) {
+                    alert(result.error || 'Action failed');
+                    return;
+                }
+
+                if (action === 'restore' || action === 'clear') {
+                    await loadMdFile('MD/MEMORY.md');
+                }
+
+                alert(options.successMessage || 'Done');
+            } catch (error) {
+                alert(options.failureMessage || 'Action failed');
+            } finally {
+                button.disabled = false;
+            }
         }
 
         async function loadSettings() {
@@ -3666,6 +3755,20 @@ const html = `<!DOCTYPE html>
         });
 
         saveMdBtn.addEventListener('click', () => saveMdFile());
+        backupMemoryBtn.addEventListener('click', () => runMemoryAction('backup', {
+            successMessage: 'MEMORY.md backed up to secrets/MEMORY.backup.md',
+            failureMessage: 'Failed to back up MEMORY.md'
+        }));
+        restoreMemoryBtn.addEventListener('click', () => runMemoryAction('restore', {
+            confirmMessage: 'Restore MD/MEMORY.md from secrets/MEMORY.backup.md?',
+            successMessage: 'MEMORY.md restored from backup',
+            failureMessage: 'Failed to restore MEMORY.md'
+        }));
+        clearMemoryBtn.addEventListener('click', () => runMemoryAction('clear', {
+            confirmMessage: 'Clear MD/MEMORY.md? A backup will be saved to secrets/MEMORY.backup.md first.',
+            successMessage: 'MEMORY.md cleared after creating a backup',
+            failureMessage: 'Failed to clear MEMORY.md'
+        }));
         editorTextarea.addEventListener('input', function() {
             updateGutter('editor', editorTextarea.value);
         });
@@ -4028,6 +4131,45 @@ const server = http.createServer((req, res) => {
             if (e && e.bodyTooLarge) return;
             res.writeHead(500, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ success: false }));
+        });
+        return;
+    }
+
+    if (pathname === '/api/memory/backup' && method === 'POST') {
+        backupMemoryFile().then((result) => {
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: true, ...result }));
+        }).catch((error) => {
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: false, error: error.message }));
+        });
+        return;
+    }
+
+    if (pathname === '/api/memory/restore' && method === 'POST') {
+        restoreMemoryFileFromBackup().then((result) => {
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: true, ...result }));
+        }).catch((error) => {
+            const statusCode = error && error.code === 'ENOENT' ? 404 : 500;
+            res.writeHead(statusCode, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({
+                success: false,
+                error: error && error.code === 'ENOENT'
+                    ? 'Memory backup not found in secrets/MEMORY.backup.md'
+                    : error.message
+            }));
+        });
+        return;
+    }
+
+    if (pathname === '/api/memory/clear' && method === 'POST') {
+        clearMemoryFile().then((result) => {
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: true, ...result }));
+        }).catch((error) => {
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: false, error: error.message }));
         });
         return;
     }
