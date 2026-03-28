@@ -2171,6 +2171,7 @@ const html = `<!DOCTYPE html>
         let sendInFlight = false;
         let settingsLoaded = false;
         let tokenUsageModelsLoaded = false;
+        const systemLogPollIntervalMs = 1000;
         const composerHistoryStorageKey = 'hclaw-onboard-composer-history';
         const uiStateStorageKey = 'hclaw-onboard-ui-state-v1';
         const composerHistory = [];
@@ -2836,10 +2837,10 @@ const html = `<!DOCTYPE html>
 
             const tick = async () => {
                 await loadSystemLog();
-                systemLogPollTimer = window.setTimeout(tick, 1500);
+                systemLogPollTimer = window.setTimeout(tick, systemLogPollIntervalMs);
             };
 
-            systemLogPollTimer = window.setTimeout(tick, 1500);
+            tick();
         }
 
         function setActiveView(view) {
