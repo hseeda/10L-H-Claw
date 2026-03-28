@@ -1270,6 +1270,7 @@ const html = `<!DOCTYPE html>
             display: flex;
             align-items: flex-end;
             gap: 14px;
+            position: relative;
         }
 
         .composer-select,
@@ -1293,16 +1294,34 @@ const html = `<!DOCTYPE html>
             width: 185px;
         }
 
-        .composer-message {
+        .composer-message-wrap {
             flex: 1;
             min-width: 0;
             min-height: 50px;
-            max-height: 160px;
+            position: relative;
+        }
+
+        .composer-message {
+            width: 100%;
+            min-height: 50px;
+            height: 50px;
+            max-height: 180px;
             padding: 12px 18px;
-            resize: vertical;
-            overflow-y: auto;
+            resize: none;
+            overflow-y: hidden;
             font: inherit;
             line-height: 1.45;
+            position: relative;
+            z-index: 1;
+        }
+
+        .composer-message.overlay-active {
+            position: absolute;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            z-index: 8;
+            box-shadow: 0 16px 34px rgba(18, 22, 28, 0.18);
         }
 
         .send-btn {
@@ -1907,7 +1926,9 @@ const html = `<!DOCTYPE html>
                                     <option value="telegram">Telegram</option>
                                 </select>
                                 <input class="composer-input composer-target" id="composer-target" type="text" placeholder="Recipient ID" aria-label="Recipient ID">
-                                <textarea class="composer-input composer-message" id="composer-text" placeholder="Message H-Claw..." aria-label="Message" rows="2"></textarea>
+                                <div class="composer-message-wrap">
+                                    <textarea class="composer-input composer-message" id="composer-text" placeholder="Message H-Claw..." aria-label="Message" rows="1"></textarea>
+                                </div>
                                 <datalist id="composer-history-list"></datalist>
                                 <label class="attach-btn" for="composer-image" id="composer-image-btn" aria-label="Attach image">
                                     <i class="fa-regular fa-image" aria-hidden="true"></i>
@@ -2179,6 +2200,8 @@ const html = `<!DOCTYPE html>
         let settingsLoaded = false;
         let tokenUsageModelsLoaded = false;
         const systemLogPollIntervalMs = 1000;
+        const composerMessageBaseHeight = 50;
+        const composerMessageMaxHeight = 180;
         const composerHistoryStorageKey = 'hclaw-onboard-composer-history';
         const uiStateStorageKey = 'hclaw-onboard-ui-state-v1';
         const composerHistory = [];
@@ -2229,6 +2252,15 @@ const html = `<!DOCTYPE html>
                 const toggle = section.querySelector('[data-section-toggle]');
                 if (toggle) toggle.setAttribute('aria-expanded', String(!collapsed));
             });
+        }
+
+        function autoResizeComposerMessage() {
+            composerText.style.height = composerMessageBaseHeight + 'px';
+            const nextHeight = Math.min(Math.max(composerText.scrollHeight, composerMessageBaseHeight), composerMessageMaxHeight);
+            composerText.style.height = nextHeight + 'px';
+            const shouldOverlay = nextHeight > composerMessageBaseHeight || composerText.value.includes('\n');
+            composerText.classList.toggle('overlay-active', shouldOverlay);
+            composerText.style.overflowY = nextHeight >= composerMessageMaxHeight ? 'auto' : 'hidden';
         }
 
         function clearSidebarSelection() {
@@ -3399,6 +3431,7 @@ const html = `<!DOCTYPE html>
                 composerHistoryIndex = -1;
                 composerDraft = '';
                 composerText.value = '';
+                autoResizeComposerMessage();
                 clearComposerAttachment();
                 setComposerStatus('Message sent.', 'success');
                 if (platform === 'onboard') {
@@ -3783,6 +3816,7 @@ const html = `<!DOCTYPE html>
 
                 composerText.value = composerHistory[composerHistoryIndex];
                 composerText.setSelectionRange(composerText.value.length, composerText.value.length);
+                autoResizeComposerMessage();
                 return;
             }
 
@@ -3802,6 +3836,7 @@ const html = `<!DOCTYPE html>
                 }
 
                 composerText.setSelectionRange(composerText.value.length, composerText.value.length);
+                autoResizeComposerMessage();
                 return;
             }
 
@@ -3817,6 +3852,7 @@ const html = `<!DOCTYPE html>
             if (composerHistoryIndex === -1) {
                 composerDraft = composerText.value;
             }
+            autoResizeComposerMessage();
         });
         composerPlatform.addEventListener('change', () => {
             if (composerPlatform.value === 'onboard') {
@@ -3959,6 +3995,7 @@ const html = `<!DOCTYPE html>
         loadComposerHistory();
         renderComposerHistoryList();
         updateComposerAttachmentUi();
+        autoResizeComposerMessage();
         restoreSidebarSectionsFromState();
         loadStatus();
         (async () => {
