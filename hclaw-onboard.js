@@ -4390,14 +4390,7 @@ const server = http.createServer((req, res) => {
 
     if (pathname === '/api/clear-tmp' && method === 'GET') {
         const tmpDir = path.join(__dirname, 'tmp');
-        if (!fs.existsSync(tmpDir)) {
-            res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ success: true }));
-            return;
-        }
-        fs.promises.readdir(tmpDir).then(files => {
-            return Promise.all(files.map(file => fs.promises.unlink(path.join(tmpDir, file))));
-        }).then(() => {
+        clearDirectoryContents(tmpDir).then(() => {
             res.writeHead(200, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ success: true }));
         }).catch(e => {
