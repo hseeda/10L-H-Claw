@@ -1359,7 +1359,7 @@ const html = `<!DOCTYPE html>
 
         .composer-message.overlay-active {
             border-radius: 24px;
-            padding: 18px 20px;
+            padding: 18px 84px 18px 20px;
             box-shadow: 0 1px 0 rgba(255, 255, 255, 0.92) inset;
         }
 
@@ -1383,6 +1383,10 @@ const html = `<!DOCTYPE html>
             left: 22px;
             bottom: 18px;
             z-index: 3;
+        }
+
+        .composer-panel.overlay-active .composer-message {
+            padding-left: 84px;
         }
 
         .composer-panel.overlay-active .send-btn {
