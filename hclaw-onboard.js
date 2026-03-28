@@ -2331,7 +2331,7 @@ const html = `<!DOCTYPE html>
             composerText.style.height = composerMessageBaseHeight + 'px';
             const nextHeight = Math.min(Math.max(composerText.scrollHeight, composerMessageBaseHeight), composerMessageMaxHeight);
             composerText.style.height = nextHeight + 'px';
-            const shouldOverlay = nextHeight > composerMessageBaseHeight || composerText.value.includes('\n');
+            const shouldOverlay = nextHeight > composerMessageBaseHeight || composerText.value.includes('\\n');
             composerText.classList.toggle('overlay-active', shouldOverlay);
             composerPanel.classList.toggle('overlay-active', shouldOverlay);
             composerText.style.overflowY = nextHeight >= composerMessageMaxHeight ? 'auto' : 'hidden';
