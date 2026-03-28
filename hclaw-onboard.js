@@ -2337,6 +2337,13 @@ const html = `<!DOCTYPE html>
             composerText.style.overflowY = nextHeight >= composerMessageMaxHeight ? 'auto' : 'hidden';
         }
 
+        function collapseComposerMessage() {
+            composerText.style.height = composerMessageBaseHeight + 'px';
+            composerText.classList.remove('overlay-active');
+            composerPanel.classList.remove('overlay-active');
+            composerText.style.overflowY = 'hidden';
+        }
+
         function clearSidebarSelection() {
             document.querySelectorAll('[data-sidebar-item]').forEach((button) => {
                 button.classList.remove('active');
@@ -3480,6 +3487,7 @@ const html = `<!DOCTYPE html>
             sendInFlight = true;
             composerSendBtn.disabled = true;
             setComposerStatus('Sending message...', 'neutral');
+            collapseComposerMessage();
 
             try {
                 const response = await fetch('/api/send', {
@@ -3513,6 +3521,7 @@ const html = `<!DOCTYPE html>
                     await loadSystemLog();
                 }
             } catch (error) {
+                autoResizeComposerMessage();
                 setComposerStatus('Failed to send message.', 'error');
             } finally {
                 sendInFlight = false;
