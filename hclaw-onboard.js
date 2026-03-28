@@ -32,7 +32,6 @@ const memoryFilePath = path.join(__dirname, 'MD', 'MEMORY.md');
 const memoryBackupPath = path.join(__dirname, 'secrets', 'MEMORY.backup.md');
 const botScriptPath = path.resolve(__dirname, 'hclaw.js');
 const isWindows = process.platform === 'win32';
-const LOG_FILEPATH_REGEX = String.raw`(?:[a-zA-Z]:\\[^\n\)\`\'\"]*?\.[a-zA-Z0-9]{1,10})|(?:(?<=^)|(?<=[^a-zA-Z0-9]))(\./[^ \n\)\`\'\"]*?\.[a-zA-Z0-9]{1,10})|(?:(?<=^)|(?<=[^a-zA-Z0-9]))(/[^ \n\)\`\'\"]*?\.[a-zA-Z0-9]{1,10})\b|(?:\b|(?<=\s))([\w.-]+(?:[ ][\w.-]+)*(?:[\/\\][\w.-]+(?:[ ][\w.-]+)*)*\.[a-zA-Z0-9]{1,10})\b`;
 const MAX_LOG_VIEW_LINES = 200;
 const MAX_LOG_VIEW_CHARS = 40000;
 const MAX_LOG_RESPONSE_BYTES = 49152;
@@ -691,16 +690,6 @@ const html = `<!DOCTYPE html>
         input,
         select {
             font: inherit;
-        }
-
-        .filepath-link {
-            text-decoration: underline;
-            color: #2563eb;
-            cursor: pointer;
-            transition: opacity 0.2s ease;
-        }
-        .filepath-link:hover {
-            opacity: 0.8;
         }
 
         .app-shell {
@@ -1792,15 +1781,6 @@ const html = `<!DOCTYPE html>
                 white-space: nowrap;
             }
 
-            .filepath-link {
-                color: #2ea57f;
-                text-decoration: underline;
-                cursor: pointer;
-                font-weight: 500;
-            }
-            .filepath-link:hover {
-                color: #248566;
-            }
         }
     </style>
 </head>
@@ -2200,7 +2180,6 @@ const html = `<!DOCTYPE html>
         </div>
     </div>
 
-    <div id="filepath-tooltip" style="display: none; position: absolute; background: #1e1e24; border: 1px solid #333; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.3); padding: 10px; z-index: 1000; max-width: 400px; max-height: 300px; overflow: auto; pointer-events: auto;" onmouseenter="clearTimeout(window.hideTooltipTimeout)" onmouseleave="window.hideFileTooltip && window.hideFileTooltip()"></div>
     <script>
         const sidebarItems = document.querySelectorAll('[data-sidebar-item]');
         const startBtn = document.getElementById('start-btn');
@@ -2285,7 +2264,6 @@ const html = `<!DOCTYPE html>
         let composerHistoryIndex = -1;
         let composerDraft = '';
         let composerAttachmentPayload = null;
-        const logPathRegex = new RegExp('${LOG_FILEPATH_REGEX.replace(/\\/g, "\\\\").replace(/\'/g, () => "\\\'")}', 'g');
 
         function getSidebarSectionKey(section, index) {
             return section.getAttribute('aria-label') || 'section-' + index;
@@ -2446,171 +2424,6 @@ const html = `<!DOCTYPE html>
             return text.replace(/[&<>"']/g, m => map[m]);
         }
 
-        function isLikelyWorkspaceFilePath(value) {
-            const candidate = String(value || '').trim();
-            if (!candidate) return false;
-            if (candidate === '.' || candidate === '..') return false;
-
-            const normalized = candidate.split('\\\\').join('/');
-            const hasDirectory = normalized.includes('/');
-            const basename = normalized.split('/').pop() || normalized;
-            const extensionMatch = basename.match(/[.]([a-zA-Z0-9]{1,10})$/);
-            const extension = extensionMatch ? extensionMatch[1].toLowerCase() : '';
-            const allowedExtensions = new Set([
-                'env', 'example', 'json', 'jsonl', 'js', 'cjs', 'mjs', 'ts', 'tsx', 'jsx',
-                'md', 'txt', 'log', 'css', 'html', 'png', 'jpg', 'jpeg', 'webp', 'gif', 'svg',
-                'mp3', 'wav', 'ogg', 'm4a', 'yml', 'yaml', 'csv', 'pdf', 'lock'
-            ]);
-
-            if (hasDirectory) return Boolean(extension);
-            if (basename.startsWith('.env')) return true;
-            return allowedExtensions.has(extension);
-        }
-
-        function splitWrappedFilePath(rawMatch) {
-            const text = String(rawMatch || '');
-            const tick = String.fromCharCode(96);
-            const wrapperRegex = new RegExp("^(['\\\"" + tick + "])(.*)\\\\1$");
-            const wrapperMatch = text.match(wrapperRegex);
-            if (wrapperMatch) {
-                const candidate = wrapperMatch[2];
-                if (isLikelyWorkspaceFilePath(candidate.split('\\\\').join('/'))) {
-                    return {
-                        prefix: wrapperMatch[1],
-                        path: candidate,
-                        suffix: wrapperMatch[1]
-                    };
-                }
-            }
-
-            let start = 0;
-            let end = text.length;
-            const leadingChars = "([{";
-            const trailingChars = ".,:;!?)]}";
-
-            while (start < end && leadingChars.includes(text[start])) start += 1;
-            while (end > start && trailingChars.includes(text[end - 1])) end -= 1;
-
-            const candidate = text.slice(start, end);
-            if (!isLikelyWorkspaceFilePath(candidate.split('\\\\').join('/'))) {
-                return { prefix: '', path: text, suffix: '' };
-            }
-
-            return {
-                prefix: text.slice(0, start),
-                path: candidate,
-                suffix: text.slice(end)
-            };
-        }
-
-        function formatTextAsHtml(text) {
-            if (!text) return '';
-            return text.split('\\n').map(function(line) {
-                const escaped = escapeHtml(line.replace(/\\r/g, ''));
-                const processed = escaped.replace(logPathRegex, (match) => {
-                    const parts = splitWrappedFilePath(match);
-                    const norm = parts.path.split('\\\\').join('/');
-                    if (!isLikelyWorkspaceFilePath(norm)) return match;
-                    return \`<span class="filepath-link" onclick="openFileInEditor('\${norm}')" onmouseenter="showFileTooltip(event, '\${norm}')" onmouseleave="hideFileTooltip()">\${parts.prefix}\${parts.path}\${parts.suffix}</span>\`;
-                });
-                return '<div class="log-line">' + processed + '</div>';
-            }).join('');
-        }
-
-        let tooltipTimeout = null;
-        window.hideTooltipTimeout = null;
-
-        function showFileTooltip(event, filePath) {
-            if (!isLikelyWorkspaceFilePath(filePath)) return;
-            if (window.hideTooltipTimeout) clearTimeout(window.hideTooltipTimeout);
-            const tooltip = document.getElementById('filepath-tooltip');
-            if (!tooltip) return;
-            
-            tooltip.innerHTML = '<div style="color: #888; font-style: italic; font-size: 12px;">Loading preview...</div>';
-            tooltip.style.display = 'block';
-            
-            const rect = event.target.getBoundingClientRect();
-            tooltip.style.left = (rect.left + window.scrollX) + 'px';
-            tooltip.style.top = (rect.bottom + window.scrollY + 5) + 'px';
-            
-            clearTimeout(tooltipTimeout);
-            tooltipTimeout = setTimeout(async () => {
-                try {
-                    const res = await fetch('/api/get-any-file?path=' + encodeURIComponent(filePath));
-                    const data = await res.json();
-                    if (!data.success) {
-                        tooltip.innerHTML = \`<div style="color: #ff4d4f; font-size: 12px;">Error: \${data.error}</div>\`;
-                        return;
-                    }
-                    if (data.isDirectory) {
-                        tooltip.innerHTML = \`<div style="font-size: 11px; color: #e4e4e7;"><strong style="display: block; margin-bottom: 6px;">Directory</strong><pre style="margin: 0; white-space: pre-wrap; color: #e4e4e7; font-family: Consolas, monospace;">\${escapeHtml(data.content)}</pre></div>\`;
-                    } else if (data.isImage) {
-                        tooltip.innerHTML = \`<img src="\${data.content}" style="max-width: 100%; max-height: 250px; border-radius: 4px; object-fit: contain;" />\`;
-                    } else if (data.isAudio) {
-                        tooltip.innerHTML = \`<audio src="\${data.content}" controls style="width: 100%; min-width: 280px; margin-top: 5px;"></audio>\`;
-                    } else {
-                        const previewText = data.wholePreview
-                            ? String(data.content || '')
-                            : String(data.content || '').substring(0, 500);
-                        const previewSuffix = !data.wholePreview && String(data.content || '').length > 500 ? '...' : '';
-                        tooltip.innerHTML = \`<pre style="margin: 0; font-size: 11px; white-space: pre-wrap; color: #e4e4e7; font-family: Consolas, monospace;">\${escapeHtml(previewText)}\${previewSuffix}</pre>\`;
-                    }
-                } catch (e) {
-                    tooltip.innerHTML = \`<div style="color: #ff4d4f; font-size: 12px;">Failed to load</div>\`;
-                }
-            }, 300);
-        }
-        
-        window.hideFileTooltip = function() {
-            clearTimeout(tooltipTimeout);
-            if (window.hideTooltipTimeout) clearTimeout(window.hideTooltipTimeout);
-            window.hideTooltipTimeout = setTimeout(() => {
-                const tooltip = document.getElementById('filepath-tooltip');
-                if (tooltip) tooltip.style.display = 'none';
-            }, 300);
-        }
-
-        async function openFileInEditor(filePath) {
-            if (!isLikelyWorkspaceFilePath(filePath)) return;
-            if (!filePath) return alert('No path provided');
-            const res = await fetch('/api/get-any-file?path=' + encodeURIComponent(filePath));
-            if (!res.ok) return alert('Failed to read file from workspace nodes.');
-            const data = await res.json();
-            if (!data.success) return alert(data.error || 'Access Denied');
-            if (data.isDirectory) return alert('This path is a directory, not a file.');
-            
-            let imgEl = document.getElementById('editor-image-preview');
-            const saveBtn = document.getElementById('save-md-btn'); // For reference if it exists
-            
-            const editorGutter = document.getElementById('editor-gutter');
-            if (data.isImage) {
-                editorTextarea.style.display = 'none';
-                if (editorGutter) editorGutter.style.display = 'none';
-                if (saveBtn) saveBtn.style.display = 'none'; // Hide save button for images
-                if (!imgEl) {
-                    imgEl = document.createElement('img');
-                    imgEl.id = 'editor-image-preview';
-                    imgEl.style.maxWidth = '100%';
-                    imgEl.style.maxHeight = '80vh';
-                    imgEl.style.objectFit = 'contain';
-                    imgEl.style.display = 'block';
-                    imgEl.style.margin = '0 auto';
-                    editorTextarea.parentNode.insertBefore(imgEl, editorTextarea);
-                }
-                imgEl.src = data.content;
-                imgEl.style.display = 'block';
-            } else {
-                if (imgEl) imgEl.style.display = 'none';
-                editorTextarea.style.display = 'block';
-                if (editorGutter) editorGutter.style.display = '';
-                if (saveBtn) saveBtn.style.display = 'inline-block'; // Restore save button for text
-                editorTextarea.value = data.content;
-                updateGutter('editor', data.content);
-                syncGutter('editor');
-            }
-            activeMdFile = data.path;
-            setActiveView('editor');
-        }
 
         function loadComposerHistory() {
             try {
@@ -2937,7 +2750,7 @@ const html = `<!DOCTYPE html>
 
                     const stickToBottom = isNearBottom(systemChatLog) || !lastLogText;
                     lastLogText = text;
-                    systemChatLog.innerHTML = formatTextAsHtml(text);
+                    systemChatLog.textContent = text;
                     updateGutter('system', text);
                     syncGutterHeights('system');
 
@@ -3444,7 +3257,7 @@ const html = `<!DOCTYPE html>
 
                 const stickToBottom = isNearBottom(botLogViewer) || !lastBotLogText;
                 lastBotLogText = text;
-                botLogViewer.innerHTML = formatTextAsHtml(text);
+                botLogViewer.textContent = text;
                 updateGutter('bot', text);
                 syncGutterHeights('bot');
 
@@ -3462,14 +3275,14 @@ const html = `<!DOCTYPE html>
 
             if (kind === 'system') {
                 lastLogText = '';
-                systemChatLog.innerHTML = '';
+                systemChatLog.textContent = '';
                 updateGutter('system', '');
                 await loadSystemLog();
                 return;
             }
 
             lastBotLogText = '';
-            botLogViewer.innerHTML = '';
+            botLogViewer.textContent = '';
             updateGutter('bot', '');
             await loadBotLog();
         }
