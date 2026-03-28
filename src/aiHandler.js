@@ -102,8 +102,13 @@ function getSystemPrompt(platform = 'whatsapp', userPrompt = '') {
   let remaining = PROMPT_LIMITS.systemChars;
   const defaultTelegramTarget = String(process.env.TELEGRAM_CHAT_ID || '').trim();
   const shouldInjectHeartbeat = /_heartbeat_/i.test(String(userPrompt || ''));
+  const { getBotLogHistory } = require('./historyHandler');
+  const botLogHistory = normalizeWhitespace(getBotLogHistory());
   remaining = appendWithinBudget(parts, (PLATFORM_PROMPTS[platformName] || PLATFORM_PROMPTS.whatsapp), remaining);
   remaining = appendWithinBudget(parts, "If media is attached, read it with a media tool before asking for re-upload.", remaining);
+  if (botLogHistory) {
+    remaining = appendWithinBudget(parts, `[RECENT BOT LOGS]\n${botLogHistory}`, remaining);
+  }
   if (platformName === 'telegram' && currentTarget) {
     remaining = appendWithinBudget(parts, `Current Telegram chat_id: ${currentTarget}.`, remaining);
   }
@@ -143,6 +148,10 @@ function clampToolResult(result) {
   return trimKeepEdges(result, PROMPT_LIMITS.toolResultChars);
 }
 
+function getUserPromptChars(prompt) {
+  return trimKeepEdges(prompt, PROMPT_LIMITS.currentMessageChars).length;
+}
+
 async function getGeminiResponse(modelName, prompt, client, chatHistory = "", platform = 'whatsapp') {
   const model = getActiveModel();
   if(model.changed) {
@@ -152,7 +161,8 @@ async function getGeminiResponse(modelName, prompt, client, chatHistory = "", pl
   const fullPrompt = buildPromptContext(prompt, chatHistory);
   const systemPrompt = getSystemPrompt(platform, prompt);
   const systemPromptChars = systemPrompt.length;
-  const userPromptChars = fullPrompt.length;
+  const inputPromptChars = fullPrompt.length;
+  const userPromptChars = getUserPromptChars(prompt);
 
   // Build initial contents array
   const contents = [{ role: 'user', parts: [{ text: fullPrompt }] }];
@@ -171,7 +181,7 @@ async function getGeminiResponse(modelName, prompt, client, chatHistory = "", pl
     cumulativeTotalTokens += response.usageMetadata.totalTokenCount || 0;
     console.log("🪙  PT = ", response.usageMetadata.promptTokenCount," CT= ", response.usageMetadata.candidatesTokenCount,
     " TT = ", response.usageMetadata.totalTokenCount, " CTT = ", cumulativeTotalTokens,
-    " SPC = ", systemPromptChars, " UPC = ", userPromptChars);       // total
+    " SPC = ", systemPromptChars, " IPC = ", inputPromptChars, " UPC = ", userPromptChars);       // total
     recordTokenUsage({
       provider: 'gemini',
       model: modelName,
@@ -243,7 +253,8 @@ async function getOpenAIResponse(modelName, prompt, client, chatHistory = "", pl
   const fullPrompt = buildPromptContext(prompt, chatHistory);
   const systemPrompt = getSystemPrompt(platform, prompt);
   const systemPromptChars = systemPrompt.length;
-  const userPromptChars = fullPrompt.length;
+  const inputPromptChars = fullPrompt.length;
+  const userPromptChars = getUserPromptChars(prompt);
 
   // Build initial messages array
   const messages = [
@@ -262,7 +273,7 @@ async function getOpenAIResponse(modelName, prompt, client, chatHistory = "", pl
     cumulativeTotalTokens += response.usage.total_tokens || 0;
     console.log("🪙  IT = ", response.usage.prompt_tokens," OT= ", response.usage.completion_tokens,
     " TT = ", response.usage.total_tokens, " CTT = ", cumulativeTotalTokens,
-    " SPC = ", systemPromptChars, " UPC = ", userPromptChars);       // total
+    " SPC = ", systemPromptChars, " IPC = ", inputPromptChars, " UPC = ", userPromptChars);       // total
     recordTokenUsage({
       provider: 'openai',
       model: modelName,
@@ -309,12 +320,7 @@ async function generateAIResponse(prompt, isSelf = false, client = null, chatHis
   let modelName = model.model;
   const { platformName } = parsePlatformContext(platform);
 
-  const { getBotLogHistory } = require('./historyHandler');
-  const botLog = getBotLogHistory();
-  let appendedHistory = '';
-  if (botLog) {
-      appendedHistory = botLog;
-  }
+  const appendedHistory = '';
 
   try {
     console.log(`${providerEmoji(provider)} ${modelName}`);
