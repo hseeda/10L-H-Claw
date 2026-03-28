@@ -10,7 +10,7 @@ require('dotenv').config({ path: path.join('secrets', '.env'), quiet: true });
 require('dotenv').config({ path: path.join('secrets', '.env_bot'), override: true, quiet: true });
 console.log = oldLog;
 
-const PORT = Number(process.env.PORT) || 8080;
+const PORT = Number(process.env.PORT) || 8081;
 const BIND_HOST = process.env.BIND_HOST || '0.0.0.0';
 const logFile = path.join('logs', 'log.txt');
 const botLogFile = path.join('logs', 'bot_log.txt');
@@ -986,6 +986,15 @@ const html = `<!DOCTYPE html>
             font-size: 22px;
         }
 
+        .workspace-actions {
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+            gap: 10px;
+            flex-wrap: wrap;
+            margin-left: auto;
+        }
+
         .clean-btn {
             min-height: 40px;
             padding: 0 16px;
@@ -1599,6 +1608,12 @@ const html = `<!DOCTYPE html>
                 gap: 12px;
             }
 
+            .workspace-actions {
+                width: 100%;
+                justify-content: flex-start;
+                margin-left: 0;
+            }
+
             .workspace-label {
                 gap: 10px;
                 font-size: 15px;
@@ -1790,30 +1805,32 @@ const html = `<!DOCTYPE html>
                         <i class="fa-regular fa-rectangle-list" id="workspace-icon" aria-hidden="true"></i>
                         <span id="workspace-title">System Chat</span>
                     </div>
-                    <button class="clean-btn" id="clean-system-log-btn" type="button">
-                        <i class="fa-solid fa-trash-can" aria-hidden="true"></i>
-                        <span>Clean</span>
-                    </button>
-                    <button class="clean-btn" id="clean-bot-log-btn" type="button" style="display: none;">
-                        <i class="fa-solid fa-trash-can" aria-hidden="true"></i>
-                        <span>Clean</span>
-                    </button>
-                    <button class="clean-btn" id="save-md-btn" type="button" style="display: none;">
-                        <i class="fa-solid fa-floppy-disk" aria-hidden="true"></i>
-                        <span>Save</span>
-                    </button>
-                    <button class="clean-btn" id="backup-memory-btn" type="button" style="display: none;">
-                        <i class="fa-solid fa-box-archive" aria-hidden="true"></i>
-                        <span>Backup</span>
-                    </button>
-                    <button class="clean-btn" id="restore-memory-btn" type="button" style="display: none;">
-                        <i class="fa-solid fa-rotate-left" aria-hidden="true"></i>
-                        <span>Restore</span>
-                    </button>
-                    <button class="clean-btn" id="clear-memory-btn" type="button" style="display: none;">
-                        <i class="fa-solid fa-eraser" aria-hidden="true"></i>
-                        <span>Clear</span>
-                    </button>
+                    <div class="workspace-actions">
+                        <button class="clean-btn" id="clean-system-log-btn" type="button">
+                            <i class="fa-solid fa-trash-can" aria-hidden="true"></i>
+                            <span>Clean</span>
+                        </button>
+                        <button class="clean-btn" id="clean-bot-log-btn" type="button" style="display: none;">
+                            <i class="fa-solid fa-trash-can" aria-hidden="true"></i>
+                            <span>Clean</span>
+                        </button>
+                        <button class="clean-btn" id="save-md-btn" type="button" style="display: none;">
+                            <i class="fa-solid fa-floppy-disk" aria-hidden="true"></i>
+                            <span>Save</span>
+                        </button>
+                        <button class="clean-btn" id="backup-memory-btn" type="button" style="display: none;">
+                            <i class="fa-solid fa-box-archive" aria-hidden="true"></i>
+                            <span>Backup</span>
+                        </button>
+                        <button class="clean-btn" id="restore-memory-btn" type="button" style="display: none;">
+                            <i class="fa-solid fa-rotate-left" aria-hidden="true"></i>
+                            <span>Restore</span>
+                        </button>
+                        <button class="clean-btn" id="clear-memory-btn" type="button" style="display: none;">
+                            <i class="fa-solid fa-eraser" aria-hidden="true"></i>
+                            <span>Clear</span>
+                        </button>
+                    </div>
                 </div>
 
                 <div class="chat-stage">
