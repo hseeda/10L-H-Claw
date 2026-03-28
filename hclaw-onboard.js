@@ -2136,11 +2136,131 @@ const html = `<!DOCTYPE html>
         let settingsLoaded = false;
         let tokenUsageModelsLoaded = false;
         const composerHistoryStorageKey = 'hclaw-onboard-composer-history';
+        const uiStateStorageKey = 'hclaw-onboard-ui-state-v1';
         const composerHistory = [];
         let composerHistoryIndex = -1;
         let composerDraft = '';
         let composerAttachmentPayload = null;
         const logPathRegex = new RegExp('${LOG_FILEPATH_REGEX.replace(/\\/g, "\\\\").replace(/\'/g, () => "\\\'")}', 'g');
+
+        function getSidebarSectionKey(section, index) {
+            return section.getAttribute('aria-label') || 'section-' + index;
+        }
+
+        function readUiState() {
+            try {
+                const raw = localStorage.getItem(uiStateStorageKey);
+                if (!raw) return null;
+                return JSON.parse(raw);
+            } catch (error) {
+                return null;
+            }
+        }
+
+        function persistUiState() {
+            try {
+                const sections = Array.from(document.querySelectorAll('.sidebar-section')).map((section, index) => ({
+                    key: getSidebarSectionKey(section, index),
+                    collapsed: section.classList.contains('collapsed')
+                }));
+                localStorage.setItem(uiStateStorageKey, JSON.stringify({
+                    activeView,
+                    activeConversationSource,
+                    activeMdFile,
+                    sections
+                }));
+            } catch (error) {
+            }
+        }
+
+        function restoreSidebarSectionsFromState() {
+            const stored = readUiState();
+            if (!stored || !Array.isArray(stored.sections)) return;
+
+            const sectionMap = new Map(stored.sections.map((entry) => [entry.key, Boolean(entry.collapsed)]));
+            Array.from(document.querySelectorAll('.sidebar-section')).forEach((section, index) => {
+                const collapsed = sectionMap.get(getSidebarSectionKey(section, index));
+                if (collapsed === undefined) return;
+                section.classList.toggle('collapsed', collapsed);
+                const toggle = section.querySelector('[data-section-toggle]');
+                if (toggle) toggle.setAttribute('aria-expanded', String(!collapsed));
+            });
+        }
+
+        function clearSidebarSelection() {
+            document.querySelectorAll('[data-sidebar-item]').forEach((button) => {
+                button.classList.remove('active');
+                button.removeAttribute('aria-current');
+            });
+        }
+
+        function setActiveSidebarItem(item) {
+            clearSidebarSelection();
+            if (!item) return;
+            item.classList.add('active');
+            item.setAttribute('aria-current', 'page');
+        }
+
+        async function restoreUiState() {
+            const stored = readUiState();
+            if (!stored) return false;
+
+            restoreSidebarSectionsFromState();
+
+            if (stored.activeView === 'editor' && stored.activeMdFile) {
+                const editorBtn = Array.from(mdFileList.querySelectorAll('.nav-item')).find((button) => button.dataset.filePath === stored.activeMdFile);
+                if (editorBtn) {
+                    activeMdFile = stored.activeMdFile;
+                    setActiveSidebarItem(editorBtn);
+                    setActiveView('editor');
+                    await loadMdFile(stored.activeMdFile);
+                    return true;
+                }
+            }
+
+            if (stored.activeView === 'bot') {
+                setActiveSidebarItem(navBotLogs);
+                setActiveView('bot');
+                await loadBotLog();
+                return true;
+            }
+
+            if (stored.activeView === 'settings') {
+                setActiveSidebarItem(navSettings);
+                setActiveView('settings');
+                if (!settingsLoaded) {
+                    await loadSettings();
+                }
+                return true;
+            }
+
+            if (stored.activeView === 'schedule') {
+                const navSchedule = document.getElementById('nav-schedule');
+                setActiveSidebarItem(navSchedule);
+                setActiveView('schedule');
+                return true;
+            }
+
+            if (stored.activeView === 'token-usage') {
+                setActiveSidebarItem(navTokenUsage);
+                setActiveView('token-usage');
+                return true;
+            }
+
+            const sourceToNav = {
+                wa: navWaLog,
+                tg: navTgLog,
+                ob: navObLog,
+                system: navSystemChat
+            };
+            activeConversationSource = sourceToNav[stored.activeConversationSource] ? stored.activeConversationSource : 'system';
+            setActiveSidebarItem(sourceToNav[activeConversationSource] || navSystemChat);
+            setComposerPlatform(activeConversationSource === 'wa' ? 'whatsapp' : activeConversationSource === 'tg' ? 'telegram' : 'onboard');
+            setActiveView('system');
+            lastLogText = '';
+            await loadSystemLog();
+            return true;
+        }
 
         function isMobileLayout() {
             return window.innerWidth <= 900;
@@ -2705,6 +2825,7 @@ const html = `<!DOCTYPE html>
             syncWorkspaceHeader();
             if (showSchedule) { loadSchedules(); _schedRefreshStart(); } else { _schedRefreshStop(); }
             if (showTokenUsage) { loadTokenUsageDashboard(); }
+            persistUiState();
         }
 
         let _schedRefreshTimer = null;
@@ -2726,14 +2847,14 @@ const html = `<!DOCTYPE html>
                     btn.className = 'nav-item';
                     btn.type = 'button';
                     btn.setAttribute('data-sidebar-item', '');
+                    btn.dataset.filePath = file.path;
                     btn.innerHTML = '<i class="fa-regular fa-file" aria-hidden="true"></i><span>' + file.label + '</span>';
-                    btn.addEventListener('click', () => {
-                        mdFileList.querySelectorAll('.nav-item').forEach(b => b.classList.remove('active'));
-                        sidebarItems.forEach(b => b.classList.remove('active'));
-                        btn.classList.add('active');
+                    btn.addEventListener('click', async () => {
+                        setActiveSidebarItem(btn);
                         activeMdFile = file.path;
                         setActiveView('editor');
-                        loadMdFile(file.path);
+                        await loadMdFile(file.path);
+                        persistUiState();
                     });
                     mdFileList.appendChild(btn);
                 });
@@ -3257,13 +3378,8 @@ const html = `<!DOCTYPE html>
             item.addEventListener('click', () => {
                 if (item.disabled) return;
                 if (isMobileLayout()) closeMobileMenu();
-                sidebarItems.forEach((button) => {
-                    button.classList.remove('active');
-                    button.removeAttribute('aria-current');
-                });
-
-                item.classList.add('active');
-                item.setAttribute('aria-current', 'page');
+                setActiveSidebarItem(item);
+                persistUiState();
             });
         });
 
@@ -3272,6 +3388,7 @@ const html = `<!DOCTYPE html>
                 const section = toggle.closest('.sidebar-section');
                 const isCollapsed = section.classList.toggle('collapsed');
                 toggle.setAttribute('aria-expanded', String(!isCollapsed));
+                persistUiState();
             });
         });
         mobileMenuBtn.addEventListener('click', () => toggleMobileMenu());
@@ -3318,8 +3435,7 @@ const html = `<!DOCTYPE html>
             await loadBotLog();
         });
         navTokenUsage.addEventListener('click', async () => {
-            sidebarItems.forEach(b => b.classList.remove('active'));
-            navTokenUsage.classList.add('active');
+            setActiveSidebarItem(navTokenUsage);
             setActiveView('token-usage');
         });
         navSettings.addEventListener('click', async () => {
@@ -3343,8 +3459,7 @@ const html = `<!DOCTYPE html>
         const schedPromptInput = document.getElementById('sched-prompt');
 
         navSchedule.addEventListener('click', () => {
-            sidebarItems.forEach(b => b.classList.remove('active'));
-            navSchedule.classList.add('active');
+            setActiveSidebarItem(navSchedule);
             setActiveView('schedule');
         });
 
@@ -3800,10 +3915,17 @@ const html = `<!DOCTYPE html>
         loadComposerHistory();
         renderComposerHistoryList();
         updateComposerAttachmentUi();
+        restoreSidebarSectionsFromState();
         loadStatus();
-        loadMdFileList();
-        setActiveView('system');
-        loadSystemLog();
+        (async () => {
+            await loadMdFileList();
+            const restored = await restoreUiState();
+            if (!restored) {
+                setActiveSidebarItem(navSystemChat);
+                setActiveView('system');
+                await loadSystemLog();
+            }
+        })();
         loadBotLog();
     </script>
 </body>
