@@ -13,9 +13,7 @@ MD/TOOLS.md
 heartbeat/
 MD/media/*
 MD/SCHEDULE.md
-<<<<<<< HEAD
-public/hclaw.pid
-=======
-public/hclaw.pidpublic/hclaw.pid
-public/hclaw.pid
->>>>>>> 0636387 (ignore hclaw pid file)
+*.pid
+secrets/
+*.backup.md
+
