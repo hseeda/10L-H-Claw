@@ -573,6 +573,38 @@ function sendPlainText(res, statusCode, content) {
     res.end(bodyBuffer);
 }
 
+function sendJson(res, statusCode, payload, extraHeaders = {}) {
+    res.writeHead(statusCode, {
+        'Content-Type': 'application/json',
+        ...extraHeaders
+    });
+    res.end(JSON.stringify(payload));
+}
+
+function sendSuccess(res, payload = {}, statusCode = 200) {
+    sendJson(res, statusCode, { success: true, ...payload });
+}
+
+function sendFailure(res, statusCode = 500, error = '', extra = {}) {
+    sendJson(res, statusCode, {
+        success: false,
+        ...(error ? { error } : {}),
+        ...extra
+    });
+}
+
+function cleanupTempFile(filePath) {
+    if (!filePath || !fs.existsSync(filePath)) return;
+    try {
+        fs.unlinkSync(filePath);
+    } catch (cleanupError) {
+    }
+}
+
+function getSystemLogContent(source) {
+    return source === 'system' ? readSystemLog() : buildFilteredLog(source);
+}
+
 function resolveWorkspaceFilePath(fileParam) {
     const rawPath = String(fileParam || '').trim();
     if (!rawPath) return null;
@@ -3451,6 +3483,14 @@ const html = `<!DOCTYPE html>
             composerPlatform.dispatchEvent(new Event('change'));
         }
 
+        async function openSystemConversation(source, platform) {
+            activeConversationSource = source;
+            setComposerPlatform(platform);
+            setActiveView('system');
+            lastLogText = '';
+            await loadSystemLog();
+        }
+
         sidebarItems.forEach((item) => {
             item.addEventListener('click', () => {
                 if (item.disabled) return;
@@ -3479,34 +3519,10 @@ const html = `<!DOCTYPE html>
         restartBtn.addEventListener('click', () => requestBotAction('restart'));
         sidebarStartBtn.addEventListener('click', () => requestBotAction('start'));
         sidebarStopBtn.addEventListener('click', () => requestBotAction('stop'));
-        navSystemChat.addEventListener('click', async () => {
-            activeConversationSource = 'system';
-            setComposerPlatform('onboard');
-            setActiveView('system');
-            lastLogText = '';
-            await loadSystemLog();
-        });
-        navWaLog.addEventListener('click', async () => {
-            activeConversationSource = 'wa';
-            setComposerPlatform('whatsapp');
-            setActiveView('system');
-            lastLogText = '';
-            await loadSystemLog();
-        });
-        navTgLog.addEventListener('click', async () => {
-            activeConversationSource = 'tg';
-            setComposerPlatform('telegram');
-            setActiveView('system');
-            lastLogText = '';
-            await loadSystemLog();
-        });
-        navObLog.addEventListener('click', async () => {
-            activeConversationSource = 'ob';
-            setComposerPlatform('onboard');
-            setActiveView('system');
-            lastLogText = '';
-            await loadSystemLog();
-        });
+        navSystemChat.addEventListener('click', () => openSystemConversation('system', 'onboard'));
+        navWaLog.addEventListener('click', () => openSystemConversation('wa', 'whatsapp'));
+        navTgLog.addEventListener('click', () => openSystemConversation('tg', 'telegram'));
+        navObLog.addEventListener('click', () => openSystemConversation('ob', 'onboard'));
         navBotLogs.addEventListener('click', async () => {
             setActiveView('bot');
             await loadBotLog();
@@ -4054,26 +4070,21 @@ const server = http.createServer((req, res) => {
     }
 
     if (pathname === '/api/status' && method === 'GET') {
-        res.writeHead(200, {
-            'Content-Type': 'application/json',
-            'Cache-Control': 'no-store, no-cache, must-revalidate'
-        });
+        const statusHeaders = { 'Cache-Control': 'no-store, no-cache, must-revalidate' };
         isBotRunning().then((running) => {
-            res.end(JSON.stringify({
+            sendJson(res, 200, {
                 running,
                 connected: Boolean(botProcess && botProcess.connected),
-            }));
+            }, statusHeaders);
         }).catch(() => {
-            res.end(JSON.stringify({ running: false, connected: false }));
+            sendJson(res, 200, { running: false, connected: false }, statusHeaders);
         });
         return;
     }
 
     if (pathname === '/api/system-log' && method === 'GET') {
         const source = requestUrl.searchParams.get('source') || 'system';
-        const contentPromise = source === 'system' ? readSystemLog() : buildFilteredLog(source);
-
-        contentPromise.then((content) => {
+        getSystemLogContent(source).then((content) => {
             sendPlainText(res, 200, trimLogForUi(content));
         }).catch(() => {
             sendPlainText(res, 500, '');
@@ -4095,17 +4106,14 @@ const server = http.createServer((req, res) => {
         const targetFile = kind === 'bot' ? botLogFile : kind === 'system' ? logFile : null;
 
         if (!targetFile) {
-            res.writeHead(400, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ success: false }));
+            sendFailure(res, 400);
             return;
         }
 
         clearFile(targetFile).then(() => {
-            res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ success: true }));
+            sendSuccess(res);
         }).catch(() => {
-            res.writeHead(500, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ success: false }));
+            sendFailure(res);
         });
         return;
     }
@@ -4118,11 +4126,9 @@ const server = http.createServer((req, res) => {
             clearFile(tgLogFile),
             clearFile(obLogFile),
         ]).then(() => {
-            res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ success: true }));
+            sendSuccess(res);
         }).catch(() => {
-            res.writeHead(500, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ success: false }));
+            sendFailure(res);
         });
         return;
     }
@@ -4132,8 +4138,7 @@ const server = http.createServer((req, res) => {
 
         const { models, imageModels } = getSettingsModelLists();
 
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ historyLimit, maxToolCalls, defaultBotModel, defaultImageModel, models, imageModels }));
+        sendJson(res, 200, { historyLimit, maxToolCalls, defaultBotModel, defaultImageModel, models, imageModels });
         return;
     }
 
@@ -4146,11 +4151,9 @@ const server = http.createServer((req, res) => {
             const platform = requestUrl.searchParams.get('platform') || '';
             const tokenType = String(requestUrl.searchParams.get('tokenType') || '').toLowerCase();
             const summary = getTokenUsageSummary({ period, groupBy, model, provider, platform, tokenType });
-            res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify(summary));
+            sendJson(res, 200, summary);
         } catch (e) {
-            res.writeHead(500, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ success: false, error: e.message }));
+            sendFailure(res, 500, e.message);
         }
         return;
     }
@@ -4189,16 +4192,13 @@ const server = http.createServer((req, res) => {
                     });
                 }
 
-                res.writeHead(200, { 'Content-Type': 'application/json' });
-                res.end(JSON.stringify({ success: true }));
+                sendSuccess(res);
             } catch (error) {
-                res.writeHead(500, { 'Content-Type': 'application/json' });
-                res.end(JSON.stringify({ success: false }));
+                sendFailure(res);
             }
         }).catch((e) => {
             if (e && e.bodyTooLarge) return;
-            res.writeHead(500, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ success: false }));
+            sendFailure(res);
         });
         return;
     }
@@ -4218,8 +4218,7 @@ const server = http.createServer((req, res) => {
                 const hasMedia = Boolean(mediaData);
 
                 if (!platform || (!trimmedText && !hasMedia)) {
-                    res.writeHead(200, { 'Content-Type': 'application/json' });
-                    res.end(JSON.stringify({ success: false, error: 'A platform and either text or a media attachment are required.' }));
+                    sendFailure(res, 200, 'A platform and either text or a media attachment are required.');
                     return;
                 }
 
@@ -4239,47 +4238,26 @@ const server = http.createServer((req, res) => {
 
                 if (botProcess && botProcess.connected) {
                     botProcess.send(sendPayload);
-                    res.writeHead(200, { 'Content-Type': 'application/json' });
-                    res.end(JSON.stringify({ success: true, mode: 'ipc' }));
+                    sendSuccess(res, { mode: 'ipc' });
                     return;
                 }
 
                 const running = await isBotRunning();
-                res.writeHead(200, { 'Content-Type': 'application/json' });
                 if (running) {
                     await enqueueBridgeCommand(sendPayload);
-                    res.end(JSON.stringify({
-                        success: true,
-                        mode: 'bridge'
-                    }));
+                    sendSuccess(res, { mode: 'bridge' });
                     return;
                 }
 
-                if (mediaPath && fs.existsSync(mediaPath)) {
-                    try {
-                        fs.unlinkSync(mediaPath);
-                    } catch (cleanupError) {
-                    }
-                }
-
-                res.end(JSON.stringify({
-                    success: false,
-                    error: 'H-Claw is not running.'
-                }));
+                cleanupTempFile(mediaPath);
+                sendFailure(res, 200, 'H-Claw is not running.');
             } catch (error) {
-                if (mediaPath && fs.existsSync(mediaPath)) {
-                    try {
-                        fs.unlinkSync(mediaPath);
-                    } catch (cleanupError) {
-                    }
-                }
-                res.writeHead(200, { 'Content-Type': 'application/json' });
-                res.end(JSON.stringify({ success: false, error: error.message || 'Failed to send message.' }));
+                cleanupTempFile(mediaPath);
+                sendFailure(res, 200, error.message || 'Failed to send message.');
             }
         }).catch((e) => {
             if (e && e.bodyTooLarge) return;
-            res.writeHead(500, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ success: false, error: 'Failed to process request.' }));
+            sendFailure(res, 500, 'Failed to process request.');
         });
         return;
     }
@@ -4297,11 +4275,9 @@ const server = http.createServer((req, res) => {
                 });
             }
 
-            res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify(files));
+            sendJson(res, 200, files);
         } catch (e) {
-            res.writeHead(500, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify([]));
+            sendJson(res, 500, []);
         }
         return;
     }
@@ -4309,8 +4285,7 @@ const server = http.createServer((req, res) => {
     if (pathname === '/api/md-file' && method === 'GET') {
         const filePathParam = requestUrl.searchParams.get('path');
         if (!filePathParam || !isEditableFilePath(filePathParam)) {
-            res.writeHead(400, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ success: false, error: 'Invalid path' }));
+            sendFailure(res, 400, 'Invalid path');
             return;
         }
         const fullPath = path.join(__dirname, filePathParam);
@@ -4318,8 +4293,7 @@ const server = http.createServer((req, res) => {
             res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
             res.end(content);
         }).catch(() => {
-            res.writeHead(500, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ success: false }));
+            sendFailure(res);
         });
         return;
     }
@@ -4331,65 +4305,51 @@ const server = http.createServer((req, res) => {
                 const filePathParam = payload.path;
                 const content = payload.content;
                 if (!filePathParam || !isEditableFilePath(filePathParam)) {
-                    res.writeHead(400, { 'Content-Type': 'application/json' });
-                    res.end(JSON.stringify({ success: false, error: 'Invalid path' }));
+                    sendFailure(res, 400, 'Invalid path');
                     return;
                 }
                 const fullPath = path.join(__dirname, filePathParam);
                 fs.promises.writeFile(fullPath, content, 'utf8').then(() => {
-                    res.writeHead(200, { 'Content-Type': 'application/json' });
-                    res.end(JSON.stringify({ success: true }));
+                    sendSuccess(res);
                 }).catch(() => {
-                    res.writeHead(500, { 'Content-Type': 'application/json' });
-                    res.end(JSON.stringify({ success: false }));
+                    sendFailure(res);
                 });
             } catch (e) {
-                res.writeHead(500, { 'Content-Type': 'application/json' });
-                res.end(JSON.stringify({ success: false }));
+                sendFailure(res);
             }
         }).catch((e) => {
             if (e && e.bodyTooLarge) return;
-            res.writeHead(500, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ success: false }));
+            sendFailure(res);
         });
         return;
     }
 
     if (pathname === '/api/memory/backup' && method === 'POST') {
         backupMemoryFile().then((result) => {
-            res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ success: true, ...result }));
+            sendSuccess(res, result);
         }).catch((error) => {
-            res.writeHead(500, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ success: false, error: error.message }));
+            sendFailure(res, 500, error.message);
         });
         return;
     }
 
     if (pathname === '/api/memory/restore' && method === 'POST') {
         restoreMemoryFileFromBackup().then((result) => {
-            res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ success: true, ...result }));
+            sendSuccess(res, result);
         }).catch((error) => {
             const statusCode = error && error.code === 'ENOENT' ? 404 : 500;
-            res.writeHead(statusCode, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({
-                success: false,
-                error: error && error.code === 'ENOENT'
-                    ? 'Memory backup not found in secrets/MEMORY.backup.md'
-                    : error.message
-            }));
+            sendFailure(res, statusCode, error && error.code === 'ENOENT'
+                ? 'Memory backup not found in secrets/MEMORY.backup.md'
+                : error.message);
         });
         return;
     }
 
     if (pathname === '/api/memory/clear' && method === 'POST') {
         clearMemoryFile().then((result) => {
-            res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ success: true, ...result }));
+            sendSuccess(res, result);
         }).catch((error) => {
-            res.writeHead(500, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ success: false, error: error.message }));
+            sendFailure(res, 500, error.message);
         });
         return;
     }
@@ -4397,26 +4357,22 @@ const server = http.createServer((req, res) => {
     if (pathname === '/api/get-any-file' && method === 'GET') {
         const fileParam = requestUrl.searchParams.get('path');
         if (!fileParam) {
-            res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ success: false, error: 'No path' }));
+            sendFailure(res, 200, 'No path');
             return;
         }
         if (isSecretsPath(fileParam)) {
-            res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ success: false, error: 'Access Denied' }));
+            sendFailure(res, 200, 'Access Denied');
             return;
         }
         const fullPath = resolveWorkspaceFilePath(fileParam);
         const normalizedWorkspaceRoot = path.normalize(__dirname + path.sep);
         const normalizedFullPath = path.normalize(fullPath || '');
         if (!normalizedFullPath.startsWith(normalizedWorkspaceRoot) && normalizedFullPath !== path.normalize(__dirname)) {
-            res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ success: false, error: 'Access Denied' }));
+            sendFailure(res, 200, 'Access Denied');
             return;
         }
         if (!fs.existsSync(fullPath)) {
-            res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ success: false, error: 'File Not Found' }));
+            sendFailure(res, 200, 'File Not Found');
             return;
         }
         const stats = fs.statSync(fullPath);
@@ -4426,18 +4382,16 @@ const server = http.createServer((req, res) => {
                     .slice(0, 30)
                     .map((entry) => `${entry.isDirectory() ? '[DIR] ' : ''}${entry.name}`)
                     .join('\n');
-                res.writeHead(200, { 'Content-Type': 'application/json' });
-                res.end(JSON.stringify({
+                sendJson(res, 200, {
                     success: true,
                     isDirectory: true,
                     isImage: false,
                     isAudio: false,
                     content: preview || '(empty directory)',
                     path: fileParam
-                }));
+                });
             }).catch((err) => {
-                res.writeHead(200, { 'Content-Type': 'application/json' });
-                res.end(JSON.stringify({ success: false, error: err.message }));
+                sendFailure(res, 200, err.message);
             });
             return;
         }
@@ -4448,23 +4402,21 @@ const server = http.createServer((req, res) => {
         const promise = (isImage || isAudio) ? fs.promises.readFile(fullPath) : fs.promises.readFile(fullPath, 'utf8');
 
         promise.then(data => {
-            res.writeHead(200, { 'Content-Type': 'application/json' });
             if (isImage) {
                 const base64 = data.toString('base64');
                 const mimeMap = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.gif': 'image/gif' };
                 const mime = mimeMap[ext] || 'image/png';
-                res.end(JSON.stringify({ success: true, isImage: true, isAudio: false, wholePreview: false, content: `data:${mime};base64,${base64}`, path: fileParam }));
+                sendJson(res, 200, { success: true, isImage: true, isAudio: false, wholePreview: false, content: `data:${mime};base64,${base64}`, path: fileParam });
             } else if (isAudio) {
                 const base64 = data.toString('base64');
                 const mimeMap = { '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.ogg': 'audio/ogg', '.m4a': 'audio/mp4' };
                 const mime = mimeMap[ext] || 'audio/mpeg';
-                res.end(JSON.stringify({ success: true, isDirectory: false, isImage: false, isAudio: true, wholePreview: false, content: `data:${mime};base64,${base64}`, path: fileParam }));
+                sendJson(res, 200, { success: true, isDirectory: false, isImage: false, isAudio: true, wholePreview: false, content: `data:${mime};base64,${base64}`, path: fileParam });
             } else {
-                res.end(JSON.stringify({ success: true, isDirectory: false, isImage: false, isAudio: false, wholePreview, content: data, path: fileParam }));
+                sendJson(res, 200, { success: true, isDirectory: false, isImage: false, isAudio: false, wholePreview, content: data, path: fileParam });
             }
         }).catch(err => {
-            res.writeHead(500, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ success: false, error: err.message }));
+            sendFailure(res, 500, err.message);
         });
         return;
     }
@@ -4472,22 +4424,18 @@ const server = http.createServer((req, res) => {
     if (pathname === '/api/clear-tmp' && method === 'GET') {
         const tmpDir = path.join(__dirname, 'tmp');
         clearDirectoryContents(tmpDir).then(() => {
-            res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ success: true }));
+            sendSuccess(res);
         }).catch(e => {
-            res.writeHead(500, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ success: false, error: e.message }));
+            sendFailure(res, 500, e.message);
         });
         return;
     }
 
     if (pathname === '/api/clear-heartbeat' && method === 'GET') {
         clearDirectoryContents(heartbeatDir).then(() => {
-            res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ success: true }));
+            sendSuccess(res);
         }).catch((e) => {
-            res.writeHead(500, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ success: false, error: e.message }));
+            sendFailure(res, 500, e.message);
         });
         return;
     }
@@ -4495,33 +4443,28 @@ const server = http.createServer((req, res) => {
     if (pathname === '/api/clear-token-usage' && method === 'GET') {
         try {
             clearTokenUsageHistory();
-            res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ success: true }));
+            sendSuccess(res);
         } catch (e) {
-            res.writeHead(500, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ success: false, error: e.message }));
+            sendFailure(res, 500, e.message);
         }
         return;
     }
 
     if (pathname === '/api/start' && method === 'GET') {
         startBot();
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ success: true }));
+        sendSuccess(res);
         return;
     }
 
     if (pathname === '/api/stop' && method === 'GET') {
         stopBot();
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ success: true }));
+        sendSuccess(res);
         return;
     }
 
     if (pathname === '/api/restart' && method === 'GET') {
         restartBot();
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ success: true }));
+        sendSuccess(res);
         return;
     }
 
@@ -4535,15 +4478,10 @@ const server = http.createServer((req, res) => {
     if (pathname === '/api/schedules' && method === 'GET') {
         isBotRunning().then((running) => {
             try {
-                res.writeHead(200, {
-                    'Content-Type': 'application/json',
-                    'Cache-Control': 'no-store, no-cache, must-revalidate'
-                });
                 const tasks = running ? getScheduledTasks() : getStoredScheduledTasks();
-                res.end(JSON.stringify(tasks));
+                sendJson(res, 200, tasks, { 'Cache-Control': 'no-store, no-cache, must-revalidate' });
             } catch (e) {
-                res.writeHead(500, { 'Content-Type': 'application/json' });
-                res.end(JSON.stringify([]));
+                sendJson(res, 500, []);
             }
         });
         return;
@@ -4558,16 +4496,13 @@ const server = http.createServer((req, res) => {
                     issuer_client: payload.issuer_client || 'onboard',
                     issuer_target: resolveIssuerTargetForClient(payload.issuer_client)
                 });
-                res.writeHead(200, { 'Content-Type': 'application/json' });
-                res.end(JSON.stringify({ success: true, pid: task.pid, task }));
+                sendSuccess(res, { pid: task.pid, task });
             } catch (e) {
-                res.writeHead(400, { 'Content-Type': 'application/json' });
-                res.end(JSON.stringify({ success: false, error: e.message }));
+                sendFailure(res, 400, e.message);
             }
         }).catch((e) => {
             if (e && e.bodyTooLarge) return;
-            res.writeHead(500, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ success: false, error: 'Failed to process request.' }));
+            sendFailure(res, 500, 'Failed to process request.');
         });
         return;
     }
@@ -4576,11 +4511,9 @@ const server = http.createServer((req, res) => {
         const pid = decodeURIComponent(pathname.split('/').pop());
         try {
             deleteSchedule(pid);
-            res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ success: true }));
+            sendSuccess(res);
         } catch (e) {
-            res.writeHead(500, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ success: false, error: e.message }));
+            sendFailure(res, 500, e.message);
         }
         return;
     }
@@ -4596,16 +4529,13 @@ const server = http.createServer((req, res) => {
                         ? resolveIssuerTargetForClient(payload.issuer_client)
                         : undefined
                 });
-                res.writeHead(200, { 'Content-Type': 'application/json' });
-                res.end(JSON.stringify({ success: true, task }));
+                sendSuccess(res, { task });
             } catch (e) {
-                res.writeHead(400, { 'Content-Type': 'application/json' });
-                res.end(JSON.stringify({ success: false, error: e.message }));
+                sendFailure(res, 400, e.message);
             }
         }).catch((e) => {
             if (e && e.bodyTooLarge) return;
-            res.writeHead(500, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ success: false, error: 'Failed to process request.' }));
+            sendFailure(res, 500, 'Failed to process request.');
         });
         return;
     }
