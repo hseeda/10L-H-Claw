@@ -22,6 +22,7 @@ fs.existsSync = (value) => {
 // Define log path relative to this file (which is in src/)
 const logFile = path.resolve(__dirname, '..', 'logs', 'log.txt');
 const botLogFile = path.resolve(__dirname, '..', 'logs', 'bot_log.txt');
+const modelLogFile = path.resolve(__dirname, '..', 'logs', 'model_log.txt');
 
 // Ensure logs directory exists
 const logsDir = path.dirname(logFile);
@@ -36,6 +37,7 @@ try {
 // Create append streams
 const logStream = fs.createWriteStream(logFile, { flags: 'a' });
 const botLogStream = fs.createWriteStream(botLogFile, { flags: 'a' });
+const modelLogStream = fs.createWriteStream(modelLogFile, { flags: 'a' });
 
 const originalLog = console.log;
 const originalWarn = console.warn;
@@ -153,13 +155,32 @@ function appendBotLogSeparator() {
     return;
 }
 
+function isModelPromptLoggingEnabled() {
+    const raw = String(process.env.MODEL_PROMPT_LOG_ENABLED || '').trim().toLowerCase();
+    return raw === '1' || raw === 'true' || raw === 'yes' || raw === 'on';
+}
+
+function appendModelPromptLog(systemPrompt = '', userPrompt = '') {
+    if (!isModelPromptLoggingEnabled()) {
+        return;
+    }
+    modelLogStream.write(`${LOG_SEPARATOR}\n`);
+    modelLogStream.write(`[SYSTEM PROMPT]\n${String(systemPrompt || '')}\n`);
+    modelLogStream.write(`${LOG_SEPARATOR}\n`);
+    modelLogStream.write(`[USER PROMPT]\n${String(userPrompt || '')}\n`);
+    modelLogStream.write(`${LOG_SEPARATOR}\n`);
+    scheduleTrim(modelLogFile, modelLogStream);
+}
+
 scheduleTrim(logFile, logStream);
 scheduleTrim(botLogFile, botLogStream);
+scheduleTrim(modelLogFile, modelLogStream);
 
 // Handle graceful close on exit to flush streams if needed
 process.on('exit', () => {
     logStream.end();
     botLogStream.end();
+    modelLogStream.end();
 });
 
-module.exports = { appendBotLog, appendBotLogSeparator };
+module.exports = { appendBotLog, appendBotLogSeparator, appendModelPromptLog };

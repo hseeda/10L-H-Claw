@@ -3,6 +3,7 @@ const OpenAI = require("openai");
 const { getActiveModel, getAvailableModels, activeModelFallback} = require ('./Models');
 const { GEMINI_TOOLS, OPENAI_TOOLS, executeTool } = require('./aiTools');
 const { recordTokenUsage } = require('./tokenUsageStore');
+const { appendModelPromptLog } = require('./loggerTool');
 
 
 const geminiClient = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
@@ -100,20 +101,11 @@ function getSystemPrompt(platform = 'whatsapp', userPrompt = '') {
   const { platformName, currentTarget } = parsePlatformContext(platform);
   const parts = [];
   let remaining = PROMPT_LIMITS.systemChars;
-  const defaultTelegramTarget = String(process.env.TELEGRAM_CHAT_ID || '').trim();
   const shouldInjectHeartbeat = /_heartbeat_/i.test(String(userPrompt || ''));
   const { getBotLogHistory } = require('./historyHandler');
   const botLogHistory = normalizeWhitespace(getBotLogHistory());
-  remaining = appendWithinBudget(parts, (PLATFORM_PROMPTS[platformName] || PLATFORM_PROMPTS.whatsapp), remaining);
-  remaining = appendWithinBudget(parts, "If media is attached, read it with a media tool before asking for re-upload.", remaining);
-  if (botLogHistory) {
-    remaining = appendWithinBudget(parts, `[RECENT BOT LOGS]\n${botLogHistory}`, remaining);
-  }
   if (platformName === 'telegram' && currentTarget) {
     remaining = appendWithinBudget(parts, `Current Telegram chat_id: ${currentTarget}.`, remaining);
-  }
-  if (defaultTelegramTarget) {
-    remaining = appendWithinBudget(parts, `Default Telegram chat_id: ${defaultTelegramTarget}.`, remaining);
   }
   try {
     if (fs.existsSync(soulPath)) {
@@ -124,6 +116,9 @@ function getSystemPrompt(platform = 'whatsapp', userPrompt = '') {
     }
     if (fs.existsSync(toolsPath)) {
       remaining = appendWithinBudget(parts, fs.readFileSync(toolsPath, 'utf8'), remaining);
+    }
+    if (botLogHistory) {
+      remaining = appendWithinBudget(parts, `[RECENT BOT LOGS]\n${botLogHistory}`, remaining);
     }
     if (shouldInjectHeartbeat && fs.existsSync(heartbeatPath)) {
       remaining = appendWithinBudget(parts, fs.readFileSync(heartbeatPath, 'utf8'), remaining);
@@ -161,8 +156,8 @@ async function getGeminiResponse(modelName, prompt, client, chatHistory = "", pl
   const fullPrompt = buildPromptContext(prompt, chatHistory);
   const systemPrompt = getSystemPrompt(platform, prompt);
   const systemPromptChars = systemPrompt.length;
-  const inputPromptChars = fullPrompt.length;
   const userPromptChars = getUserPromptChars(prompt);
+  appendModelPromptLog(systemPrompt, fullPrompt);
 
   // Build initial contents array
   const contents = [{ role: 'user', parts: [{ text: fullPrompt }] }];
@@ -181,7 +176,7 @@ async function getGeminiResponse(modelName, prompt, client, chatHistory = "", pl
     cumulativeTotalTokens += response.usageMetadata.totalTokenCount || 0;
     console.log("🪙  PT = ", response.usageMetadata.promptTokenCount," CT= ", response.usageMetadata.candidatesTokenCount,
     " TT = ", response.usageMetadata.totalTokenCount, " CTT = ", cumulativeTotalTokens,
-    " SPC = ", systemPromptChars, " IPC = ", inputPromptChars, " UPC = ", userPromptChars);       // total
+    " SPC = ", systemPromptChars, " UPC = ", userPromptChars);       // total
     recordTokenUsage({
       provider: 'gemini',
       model: modelName,
@@ -253,8 +248,8 @@ async function getOpenAIResponse(modelName, prompt, client, chatHistory = "", pl
   const fullPrompt = buildPromptContext(prompt, chatHistory);
   const systemPrompt = getSystemPrompt(platform, prompt);
   const systemPromptChars = systemPrompt.length;
-  const inputPromptChars = fullPrompt.length;
   const userPromptChars = getUserPromptChars(prompt);
+  appendModelPromptLog(systemPrompt, fullPrompt);
 
   // Build initial messages array
   const messages = [
@@ -273,7 +268,7 @@ async function getOpenAIResponse(modelName, prompt, client, chatHistory = "", pl
     cumulativeTotalTokens += response.usage.total_tokens || 0;
     console.log("🪙  IT = ", response.usage.prompt_tokens," OT= ", response.usage.completion_tokens,
     " TT = ", response.usage.total_tokens, " CTT = ", cumulativeTotalTokens,
-    " SPC = ", systemPromptChars, " IPC = ", inputPromptChars, " UPC = ", userPromptChars);       // total
+    " SPC = ", systemPromptChars, " UPC = ", userPromptChars);       // total
     recordTokenUsage({
       provider: 'openai',
       model: modelName,
