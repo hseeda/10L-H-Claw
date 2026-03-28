@@ -150,6 +150,9 @@ async function getGeminiResponse(modelName, prompt, client, chatHistory = "", pl
   }
 
   const fullPrompt = buildPromptContext(prompt, chatHistory);
+  const systemPrompt = getSystemPrompt(platform, prompt);
+  const systemPromptChars = systemPrompt.length;
+  const userPromptChars = fullPrompt.length;
 
   // Build initial contents array
   const contents = [{ role: 'user', parts: [{ text: fullPrompt }] }];
@@ -160,14 +163,15 @@ async function getGeminiResponse(modelName, prompt, client, chatHistory = "", pl
       model: modelName,
       contents: contents,
       config: {
-        systemInstruction: getSystemPrompt(platform, prompt),
+        systemInstruction: systemPrompt,
         tools: GEMINI_TOOLS,
       },
     });
     //++++++++++++++++++++++++++++++
     cumulativeTotalTokens += response.usageMetadata.totalTokenCount || 0;
     console.log("🪙  PT = ", response.usageMetadata.promptTokenCount," CT= ", response.usageMetadata.candidatesTokenCount,
-    " TT = ", response.usageMetadata.totalTokenCount, " CTT = ", cumulativeTotalTokens);       // total
+    " TT = ", response.usageMetadata.totalTokenCount, " CTT = ", cumulativeTotalTokens,
+    " SPC = ", systemPromptChars, " UPC = ", userPromptChars);       // total
     recordTokenUsage({
       provider: 'gemini',
       model: modelName,
@@ -237,10 +241,13 @@ async function getOpenAIResponse(modelName, prompt, client, chatHistory = "", pl
   }
 
   const fullPrompt = buildPromptContext(prompt, chatHistory);
+  const systemPrompt = getSystemPrompt(platform, prompt);
+  const systemPromptChars = systemPrompt.length;
+  const userPromptChars = fullPrompt.length;
 
   // Build initial messages array
   const messages = [
-    { role: 'system', content: getSystemPrompt(platform, prompt) },
+    { role: 'system', content: systemPrompt },
     { role: 'user', content: fullPrompt },
   ];
   const MAX_ROUNDS = getMaxToolRounds();
@@ -254,7 +261,8 @@ async function getOpenAIResponse(modelName, prompt, client, chatHistory = "", pl
     //++++++++++++++++++++++++++++++
     cumulativeTotalTokens += response.usage.total_tokens || 0;
     console.log("🪙  IT = ", response.usage.prompt_tokens," OT= ", response.usage.completion_tokens,
-    " TT = ", response.usage.total_tokens, " CTT = ", cumulativeTotalTokens);       // total
+    " TT = ", response.usage.total_tokens, " CTT = ", cumulativeTotalTokens,
+    " SPC = ", systemPromptChars, " UPC = ", userPromptChars);       // total
     recordTokenUsage({
       provider: 'openai',
       model: modelName,
