@@ -1268,7 +1268,7 @@ const html = `<!DOCTYPE html>
 
         .composer-row {
             display: flex;
-            align-items: center;
+            align-items: flex-end;
             gap: 14px;
         }
 
@@ -1296,6 +1296,13 @@ const html = `<!DOCTYPE html>
         .composer-message {
             flex: 1;
             min-width: 0;
+            min-height: 50px;
+            max-height: 160px;
+            padding: 12px 18px;
+            resize: vertical;
+            overflow-y: auto;
+            font: inherit;
+            line-height: 1.45;
         }
 
         .send-btn {
@@ -1900,7 +1907,7 @@ const html = `<!DOCTYPE html>
                                     <option value="telegram">Telegram</option>
                                 </select>
                                 <input class="composer-input composer-target" id="composer-target" type="text" placeholder="Recipient ID" aria-label="Recipient ID">
-                                <input class="composer-input composer-message" id="composer-text" type="text" placeholder="Message H-Claw..." aria-label="Message" list="composer-history-list" autocomplete="off">
+                                <textarea class="composer-input composer-message" id="composer-text" placeholder="Message H-Claw..." aria-label="Message" rows="2"></textarea>
                                 <datalist id="composer-history-list"></datalist>
                                 <label class="attach-btn" for="composer-image" id="composer-image-btn" aria-label="Attach image">
                                     <i class="fa-regular fa-image" aria-hidden="true"></i>
