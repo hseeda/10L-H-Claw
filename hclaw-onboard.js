@@ -1296,6 +1296,15 @@ const html = `<!DOCTYPE html>
             background: rgba(255, 255, 255, 0.94);
             padding: 18px 20px 20px;
             box-shadow: 0 14px 32px rgba(18, 22, 28, 0.04);
+            position: relative;
+            transition: border-radius .16s ease, box-shadow .16s ease, padding .16s ease, background .16s ease;
+        }
+
+        .composer-panel.overlay-active {
+            border-radius: 30px;
+            background: rgba(255, 255, 255, 0.985);
+            padding: 20px 22px 84px;
+            box-shadow: 0 22px 54px rgba(18, 22, 28, 0.14);
         }
 
         .composer-row {
@@ -1337,7 +1346,7 @@ const html = `<!DOCTYPE html>
             width: 100%;
             min-height: 50px;
             height: 50px;
-            max-height: 180px;
+            max-height: 260px;
             padding: 12px 18px;
             resize: none;
             overflow-y: hidden;
@@ -1345,15 +1354,46 @@ const html = `<!DOCTYPE html>
             line-height: 1.45;
             position: relative;
             z-index: 1;
+            transition: min-height .16s ease, height .16s ease, padding .16s ease, border-radius .16s ease, background .16s ease, box-shadow .16s ease;
         }
 
         .composer-message.overlay-active {
+            border-radius: 24px;
+            padding: 18px 20px;
+            box-shadow: 0 1px 0 rgba(255, 255, 255, 0.92) inset;
+        }
+
+        .composer-panel.overlay-active .composer-row {
+            flex-wrap: wrap;
+            align-items: flex-start;
+        }
+
+        .composer-panel.overlay-active .composer-select,
+        .composer-panel.overlay-active .composer-target {
+            flex: 0 0 auto;
+        }
+
+        .composer-panel.overlay-active .composer-message-wrap {
+            flex-basis: 100%;
+            order: 3;
+        }
+
+        .composer-panel.overlay-active .attach-btn {
             position: absolute;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            z-index: 8;
-            box-shadow: 0 16px 34px rgba(18, 22, 28, 0.18);
+            left: 22px;
+            bottom: 18px;
+            z-index: 3;
+        }
+
+        .composer-panel.overlay-active .send-btn {
+            position: absolute;
+            right: 22px;
+            bottom: 18px;
+            z-index: 3;
+        }
+
+        .composer-panel.overlay-active .composer-meta {
+            margin-top: 12px;
         }
 
         .send-btn {
@@ -1950,7 +1990,7 @@ const html = `<!DOCTYPE html>
 
                 <div class="composer-wrap">
                     <div class="composer-card">
-                        <div class="composer-panel">
+                        <div class="composer-panel" id="composer-panel">
                             <div class="composer-row">
                                 <select class="composer-select" id="composer-platform" aria-label="Platform">
                                     <option value="onboard" selected>OnBoard</option>
@@ -2186,6 +2226,7 @@ const html = `<!DOCTYPE html>
         const botLogViewer = document.getElementById('bot-log-viewer');
         const composerPlatform = document.getElementById('composer-platform');
         const composerTarget = document.getElementById('composer-target');
+        const composerPanel = document.getElementById('composer-panel');
         const composerText = document.getElementById('composer-text');
         const composerHistoryList = document.getElementById('composer-history-list');
         const composerImageInput = document.getElementById('composer-image');
@@ -2292,6 +2333,7 @@ const html = `<!DOCTYPE html>
             composerText.style.height = nextHeight + 'px';
             const shouldOverlay = nextHeight > composerMessageBaseHeight || composerText.value.includes('\n');
             composerText.classList.toggle('overlay-active', shouldOverlay);
+            composerPanel.classList.toggle('overlay-active', shouldOverlay);
             composerText.style.overflowY = nextHeight >= composerMessageMaxHeight ? 'auto' : 'hidden';
         }
 
