@@ -3930,6 +3930,7 @@ const html = `<!DOCTYPE html>
             setComposerStatus('Blank recipient defaults to TELEGRAM_CHAT_ID.', 'neutral');
         });
         historyLimitInput.addEventListener('change', () => saveSettings());
+        maxToolCallsInput.addEventListener('change', () => saveSettings());
         defaultBotModelSelect.addEventListener('change', () => saveSettings());
         defaultImageModelSelect.addEventListener('change', () => saveSettings());
         tokenUsagePeriod.addEventListener('change', () => loadTokenUsageDashboard());
