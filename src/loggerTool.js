@@ -41,6 +41,8 @@ const originalLog = console.log;
 const originalWarn = console.warn;
 const originalError = console.error;
 const LOG_SEPARATOR = '──────────────────────────────────────';
+const MAX_LOG_LINES = 200;
+const trimState = new Map();
 
 function getTimestamp() {
     const d = new Date();
@@ -54,6 +56,60 @@ function isBotResponseLogLine(text) {
     return formatted.includes(' Reply: ');
 }
 
+async function trimLogFile(filePath, stream) {
+    try {
+        if (stream && !stream.closed) {
+            await new Promise((resolve) => stream.write('', resolve));
+        }
+        const raw = await fs.promises.readFile(filePath, 'utf8');
+        const lines = raw.split(/\r?\n/);
+        const endsWithNewline = /\r?\n$/.test(raw);
+        const normalizedLines = endsWithNewline ? lines.slice(0, -1) : lines;
+        if (normalizedLines.length <= MAX_LOG_LINES) {
+            return;
+        }
+        const trimmed = normalizedLines.slice(-MAX_LOG_LINES).join('\n');
+        await fs.promises.writeFile(filePath, `${trimmed}\n`, 'utf8');
+    } catch (error) {
+        // Ignore trimming failures so logging never breaks the app.
+    }
+}
+
+function scheduleTrim(filePath, stream) {
+    const current = trimState.get(filePath) || { running: false, pending: false, scheduled: false };
+    if (current.running) {
+        current.pending = true;
+        trimState.set(filePath, current);
+        return;
+    }
+    if (current.scheduled) {
+        trimState.set(filePath, current);
+        return;
+    }
+
+    current.scheduled = true;
+    trimState.set(filePath, current);
+
+    setTimeout(async () => {
+        const state = trimState.get(filePath) || { running: false, pending: false, scheduled: false };
+        state.scheduled = false;
+        state.running = true;
+        trimState.set(filePath, state);
+
+        await trimLogFile(filePath, stream);
+
+        const nextState = trimState.get(filePath) || { running: false, pending: false, scheduled: false };
+        const shouldRunAgain = nextState.pending;
+        nextState.running = false;
+        nextState.pending = false;
+        trimState.set(filePath, nextState);
+
+        if (shouldRunAgain) {
+            scheduleTrim(filePath, stream);
+        }
+    }, 25);
+}
+
 console.log = (...args) => {
     const formatted = util.format(...args);
     originalLog(...args); // Print to CLI
@@ -61,21 +117,25 @@ console.log = (...args) => {
         logStream.write(`${LOG_SEPARATOR}\n`);
         logStream.write(`[${getTimestamp()}] ${formatted}\n`);
         logStream.write(`${LOG_SEPARATOR}\n`);
+        scheduleTrim(logFile, logStream);
         return;
     }
     logStream.write(`[${getTimestamp()}] ${formatted}\n`);
+    scheduleTrim(logFile, logStream);
 };
 
 console.warn = (...args) => {
     const formatted = util.format(...args);
     originalWarn(...args);
     logStream.write(`[${getTimestamp()}] [WARN] ${formatted}\n`);
+    scheduleTrim(logFile, logStream);
 };
 
 console.error = (...args) => {
     const formatted = util.format(...args);
     originalError(...args);
     logStream.write(`[${getTimestamp()}] [ERROR] ${formatted}\n`);
+    scheduleTrim(logFile, logStream);
 };
 
 function appendBotLog(text) {
@@ -89,11 +149,16 @@ function appendBotLog(text) {
         botLogStream.write(`${LOG_SEPARATOR}\n`);
     }
     botLogStream.write(`${text}\n`);
+    scheduleTrim(botLogFile, botLogStream);
 }
 
 function appendBotLogSeparator() {
     botLogStream.write(`${LOG_SEPARATOR}\n`);
+    scheduleTrim(botLogFile, botLogStream);
 }
+
+scheduleTrim(logFile, logStream);
+scheduleTrim(botLogFile, botLogStream);
 
 // Handle graceful close on exit to flush streams if needed
 process.on('exit', () => {

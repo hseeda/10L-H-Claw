@@ -37,9 +37,11 @@ const MAX_LOG_VIEW_LINES = 200;
 const MAX_LOG_VIEW_CHARS = 40000;
 const MAX_LOG_RESPONSE_BYTES = 49152;
 const MAX_LOG_READ_BYTES = Math.max(MAX_LOG_RESPONSE_BYTES * 2, 131072);
+const LOG_TRIM_INTERVAL_MS = 1000;
 let botProcess = null;
 let botPid = null;
 let startInFlight = false;
+const activeLogTrimJobs = new Set();
 
 function readOnboardState() {
     try {
@@ -352,6 +354,40 @@ async function readLogTail(filePath, maxBytes = MAX_LOG_READ_BYTES) {
         if (error && error.code === 'ENOENT') return '';
         throw error;
     }
+}
+
+async function trimLogFileToMaxLines(filePath, maxLines = MAX_LOG_VIEW_LINES) {
+    try {
+        const raw = await fs.promises.readFile(filePath, 'utf8');
+        const lines = raw.split(/\r?\n/);
+        const endsWithNewline = /\r?\n$/.test(raw);
+        const normalizedLines = endsWithNewline ? lines.slice(0, -1) : lines;
+        if (normalizedLines.length <= maxLines) return;
+        const trimmed = normalizedLines.slice(-maxLines).join('\n');
+        await fs.promises.writeFile(filePath, `${trimmed}\n`, 'utf8');
+    } catch (error) {
+        if (error && error.code === 'ENOENT') return;
+    }
+}
+
+async function trimManagedLogs() {
+    const targets = [logFile, botLogFile];
+    await Promise.all(targets.map(async (filePath) => {
+        if (activeLogTrimJobs.has(filePath)) return;
+        activeLogTrimJobs.add(filePath);
+        try {
+            await trimLogFileToMaxLines(filePath);
+        } finally {
+            activeLogTrimJobs.delete(filePath);
+        }
+    }));
+}
+
+function startLiveLogTrimming() {
+    trimManagedLogs().catch(() => { });
+    setInterval(() => {
+        trimManagedLogs().catch(() => { });
+    }, LOG_TRIM_INTERVAL_MS);
 }
 
 async function readSystemLog() {
@@ -4557,6 +4593,8 @@ server.on('clientError', (_err, socket) => {
 process.on('unhandledRejection', (reason) => {
     console.error('[OnBoard] Unhandled rejection:', reason);
 });
+
+startLiveLogTrimming();
 
 server.listen(PORT, BIND_HOST, () => {
     const displayHost = BIND_HOST === '0.0.0.0' ? 'localhost' : BIND_HOST;
