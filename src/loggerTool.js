@@ -145,16 +145,12 @@ function appendBotLog(text) {
     if (typeof text === 'string' && /heartbeat/i.test(text)) {
         return;
     }
-    if (typeof text === 'string' && text.startsWith('👤')) {
-        botLogStream.write(`${LOG_SEPARATOR}\n`);
-    }
     botLogStream.write(`${text}\n`);
     scheduleTrim(botLogFile, botLogStream);
 }
 
 function appendBotLogSeparator() {
-    botLogStream.write(`${LOG_SEPARATOR}\n`);
-    scheduleTrim(botLogFile, botLogStream);
+    return;
 }
 
 scheduleTrim(logFile, logStream);
