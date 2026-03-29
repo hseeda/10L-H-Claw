@@ -492,34 +492,22 @@ function readEnvBotSettings() {
 
 async function buildFilteredLog(source) {
     const rawContent = await readSystemLog();
-    if (!rawContent) {
-        if (source === 'wa') await clearFile(waLogFile);
-        if (source === 'tg') await clearFile(tgLogFile);
-        if (source === 'ob') await clearFile(obLogFile);
-        return '';
-    }
+    if (!rawContent) return '';
 
     const lines = rawContent.split(/\r?\n/);
     let filteredLines = [];
-    let targetFile = null;
 
     if (source === 'wa') {
         filteredLines = lines.filter((line) => line.includes(' WA '));
-        targetFile = waLogFile;
     } else if (source === 'tg') {
         filteredLines = lines.filter((line) => line.includes(' TG '));
-        targetFile = tgLogFile;
     } else if (source === 'ob') {
         filteredLines = lines.filter((line) => line.includes('[OB]') || line.includes('[OnBoard]'));
-        targetFile = obLogFile;
     } else {
         return rawContent;
     }
 
-    const filteredContent = filteredLines.join('\n');
-    await fs.promises.mkdir(path.dirname(targetFile), { recursive: true });
-    await fs.promises.writeFile(targetFile, filteredContent, 'utf8');
-    return filteredContent;
+    return filteredLines.join('\n');
 }
 
 function trimLogForUi(content) {
@@ -2682,6 +2670,14 @@ const html = `<!DOCTYPE html>
             return element.scrollHeight - element.scrollTop - element.clientHeight < 24;
         }
 
+        function hasSelectionInside(element) {
+            const selection = window.getSelection ? window.getSelection() : null;
+            if (!selection || selection.rangeCount === 0 || selection.isCollapsed) return false;
+            const anchorNode = selection.anchorNode;
+            const focusNode = selection.focusNode;
+            return !!(anchorNode && element.contains(anchorNode)) || !!(focusNode && element.contains(focusNode));
+        }
+
         function getConversationMeta(source) {
             if (source === 'wa') {
                 return { title: 'WhatsApp', icon: 'fa-brands fa-whatsapp' };
@@ -2805,7 +2801,24 @@ const html = `<!DOCTYPE html>
             }
         }
 
+        function renderSystemLogText(text) {
+            const normalizedText = String(text || '');
+            const stickToBottom = isNearBottom(systemChatLog) || !lastLogText;
+            lastLogText = normalizedText;
+            systemChatLog.textContent = normalizedText;
+            pulseWorkspaceHeart();
+            updateGutter('system', normalizedText);
+            syncGutterHeights('system');
+            if (stickToBottom) {
+                systemChatLog.scrollTop = systemChatLog.scrollHeight;
+            }
+            syncGutter('system');
+        }
+
         let systemLogRequestInFlight = null;
+        let latestSystemLogRequestId = 0;
+        let systemLogRequestSource = '';
+        let systemLogAbortController = null;
         let systemLogPollTimer = null;
         let statusPollTimer = null;
         let botLogPollTimer = null;
@@ -2817,39 +2830,58 @@ const html = `<!DOCTYPE html>
         async function loadSystemLog() {
             if (!isBrowserVisible()) return;
             if (activeView !== 'system') return;
-            if (document.activeElement === systemChatLog) return;
-            if (systemLogRequestInFlight) return systemLogRequestInFlight;
+            if (hasSelectionInside(systemChatLog)) return;
 
-            systemLogRequestInFlight = (async () => {
+            const requestId = ++latestSystemLogRequestId;
+            const sourceAtRequestTime = activeConversationSource;
+            if (systemLogRequestInFlight) {
+                if (systemLogRequestSource === sourceAtRequestTime) {
+                    return systemLogRequestInFlight;
+                }
+                if (systemLogAbortController) {
+                    systemLogAbortController.abort();
+                }
+            }
+
+            const abortController = new AbortController();
+            systemLogRequestSource = sourceAtRequestTime;
+            systemLogAbortController = abortController;
+            const requestPromise = (async () => {
                 try {
                     pulseWorkspaceHeart();
-                    const requestUrl = '/api/system-log?source=' + encodeURIComponent(activeConversationSource) + '&_ts=' + Date.now();
+                    const requestUrl = '/api/system-log?source=' + encodeURIComponent(sourceAtRequestTime) + '&_ts=' + Date.now();
                     const response = await fetch(requestUrl, {
                         cache: 'no-store',
+                        signal: abortController.signal,
                         headers: {
                             'Cache-Control': 'no-cache, no-store, max-age=0',
                             'Pragma': 'no-cache'
                         }
                     });
-                    const text = await response.text();
-                    if (text === lastLogText) return;
-
-                    const stickToBottom = isNearBottom(systemChatLog) || !lastLogText;
-                    lastLogText = text;
-                    systemChatLog.textContent = text;
-                    pulseWorkspaceHeart();
-                    updateGutter('system', text);
-                    syncGutterHeights('system');
-
-                    if (stickToBottom) {
-                        systemChatLog.scrollTop = systemChatLog.scrollHeight;
+                    if (!response.ok) {
+                        throw new Error('system_log_http_' + response.status);
                     }
-                    syncGutter('system');
+                    const text = await response.text();
+                    if (requestId !== latestSystemLogRequestId) return;
+                    if (activeView !== 'system') return;
+                    if (sourceAtRequestTime !== activeConversationSource) return;
+                    if (text === lastLogText) return;
+                    renderSystemLogText(text);
                 } catch (error) {
+                    if (error && error.name === 'AbortError') return;
                 } finally {
-                    systemLogRequestInFlight = null;
+                    if (systemLogAbortController === abortController) {
+                        systemLogAbortController = null;
+                    }
+                    if (systemLogRequestSource === sourceAtRequestTime) {
+                        systemLogRequestSource = '';
+                    }
+                    if (systemLogRequestInFlight === requestPromise) {
+                        systemLogRequestInFlight = null;
+                    }
                 }
             })();
+            systemLogRequestInFlight = requestPromise;
 
             return systemLogRequestInFlight;
         }
