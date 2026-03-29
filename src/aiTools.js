@@ -94,6 +94,24 @@ function detectMimeTypeFromPath(filePath) {
   return "application/octet-stream";
 }
 
+function parseAttachmentPaths(value) {
+  if (Array.isArray(value)) {
+    return value.map((item) => String(item || '').trim()).filter(Boolean);
+  }
+  const raw = String(value || '').trim();
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      return parsed.map((item) => String(item || '').trim()).filter(Boolean);
+    }
+  } catch {}
+  return raw
+    .split(/\r?\n|,/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
 async function analyzeLocalMediaFile(filePath, mimeType = "") {
   if (!filePath || !fs.existsSync(filePath)) {
     return `❌ Local media not found: ${filePath}`;
@@ -174,7 +192,7 @@ const customToolsSchema = [
   { name: "whatsapp_download_media", description: "Download WA media", parameters: P({ message_id: S("id"), filename: S("n") }, ["message_id"]) },
   { name: "mail_add_account", description: "Add mail acct", parameters: P({ name: S("n"), host: S("h"), port: I("p"), secure: B("ssl"), user: S("u"), pass: S("pw"), type: S("smtp|imap") }, ["name", "host", "port", "secure", "user", "pass", "type"]) },
   { name: "mail_list_accounts", description: "List mail accts" },
-  { name: "mail_send_email", description: "Send email", parameters: P({ account_name: S("Account name (e.g., 'gmail' or 'gmail_smtp')"), to: S("Recipient email"), subject: S("Subject"), body: S("Plain text body"), html: S("HTML body [optional]") }, ["account_name", "to", "subject", "body"]) },
+  { name: "mail_send_email", description: "Send email with optional binary attachments such as PDFs and images", parameters: P({ account_name: S("Account name (e.g., 'gmail' or 'gmail_smtp')"), to: S("Recipient email"), subject: S("Subject"), body: S("Plain text body"), html: S("HTML body [optional]"), attachment_paths: S("Optional local file paths for attachments. Use a JSON array or comma/newline separated paths.") }, ["account_name", "to", "subject", "body"]) },
   { name: "mail_list_folders", description: "List IMAP folders", parameters: P({ account_name: S("Account name (e.g., 'gmail' or 'gmail_imap')") }, ["account_name"]) },
   { name: "mail_list_messages", description: "List email headers", parameters: P({ account_name: S("Account name (e.g., 'gmail' or 'gmail_imap')"), folder: S("Folder (default: INBOX)"), limit: I("Max count") }, ["account_name"]) },
   { name: "mail_list_messages_all", description: "List full emails", parameters: P({ account_name: S("Account name (e.g., 'gmail' or 'gmail_imap')"), folder: S("Folder (default: INBOX)"), limit: I("Max count") }, ["account_name"]) },
@@ -911,7 +929,8 @@ FileUri: ${uploadResult.uri}`;
 
   if (name === "mail_send_email") {
     try {
-      const mid = await mailManager.sendEmail(args.account_name, args.to, args.subject, args.body, args.html);
+      const attachmentPaths = parseAttachmentPaths(args.attachment_paths);
+      const mid = await mailManager.sendEmail(args.account_name, args.to, args.subject, args.body, args.html, attachmentPaths);
       return `✅ Email sent. ID: ${mid}`;
     } catch (e) {
       return `❌ Mail Send Error: ${e.message}`;

@@ -47,7 +47,7 @@ class MailManager {
     return Object.keys(this.accounts);
   }
 
-  async sendEmail(accountName, to, subject, text, html = null) {
+  async sendEmail(accountName, to, subject, text, html = null, attachments = []) {
     let config = this.accounts[accountName];
     if (!config && this.accounts[`${accountName}_smtp`]) {
       config = this.accounts[`${accountName}_smtp`];
@@ -64,12 +64,25 @@ class MailManager {
       },
     });
 
+    const normalizedAttachments = (Array.isArray(attachments) ? attachments : []).map((item) => {
+      const filePath = String(item && item.path ? item.path : item || '').trim();
+      if (!filePath) return null;
+      if (!fs.existsSync(filePath)) {
+        throw new Error(`Attachment not found: ${filePath}`);
+      }
+      return {
+        filename: path.basename(filePath),
+        path: filePath,
+      };
+    }).filter(Boolean);
+
     const info = await transporter.sendMail({
       from: config.user,
       to,
       subject,
       text,
       html,
+      attachments: normalizedAttachments,
     });
 
     return info.messageId;
