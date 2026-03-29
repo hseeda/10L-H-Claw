@@ -497,9 +497,23 @@ async function buildFilteredLog(source) {
     let filteredLines = [];
 
     if (source === 'wa') {
-        filteredLines = lines.filter((line) => line.includes(' WA '));
+        filteredLines = lines.filter((line) => {
+            const text = String(line || '');
+            return text.includes(' WA ')
+                || text.includes('WhatsApp')
+                || text.includes('[IPC] Sent WA')
+                || text.includes('[IPC] Failed to send WA')
+                || text.includes('Error fetching WhatsApp history');
+        });
     } else if (source === 'tg') {
-        filteredLines = lines.filter((line) => line.includes(' TG '));
+        filteredLines = lines.filter((line) => {
+            const text = String(line || '');
+            return text.includes(' TG ')
+                || text.includes('Telegram')
+                || text.includes('[IPC] Sent TG')
+                || text.includes('[IPC] Processed TG')
+                || text.includes('[IPC] Failed to send TG');
+        });
     } else if (source === 'ob') {
         filteredLines = lines.filter((line) => line.includes('[OB]') || line.includes('[OnBoard]'));
     } else {
@@ -1912,6 +1926,10 @@ const html = `<!DOCTYPE html>
                         <span id="workspace-title">System Chat</span>
                     </div>
                     <div class="workspace-actions">
+                        <button class="clean-btn" id="refresh-system-log-btn" type="button">
+                            <i class="fa-solid fa-rotate-right" aria-hidden="true"></i>
+                            <span>Refresh</span>
+                        </button>
                         <button class="clean-btn" id="clean-system-log-btn" type="button">
                             <i class="fa-solid fa-trash-can" aria-hidden="true"></i>
                             <span>Clean</span>
@@ -2205,6 +2223,7 @@ const html = `<!DOCTYPE html>
         const composerAttachmentName = document.getElementById('composer-attachment-name');
         const composerSendBtn = document.getElementById('composer-send-btn');
         const composerHint = document.getElementById('composer-hint');
+        const refreshSystemLogBtn = document.getElementById('refresh-system-log-btn');
         const cleanSystemLogBtn = document.getElementById('clean-system-log-btn');
         const cleanBotLogBtn = document.getElementById('clean-bot-log-btn');
         const sidebarClearTmpBtn = document.getElementById('sidebar-clear-tmp-btn');
@@ -2640,6 +2659,7 @@ const html = `<!DOCTYPE html>
             if (activeView === 'settings') {
                 workspaceTitle.textContent = 'Settings';
                 workspaceIcon.className = 'fa-solid fa-sliders';
+                refreshSystemLogBtn.style.display = 'none';
                 cleanSystemLogBtn.style.display = 'none';
                 cleanBotLogBtn.style.display = 'none';
                 saveMdBtn.style.display = 'none';
@@ -2649,6 +2669,7 @@ const html = `<!DOCTYPE html>
             if (activeView === 'bot') {
                 workspaceTitle.textContent = 'Bot Logs';
                 workspaceIcon.className = 'fa-solid fa-file-invoice';
+                refreshSystemLogBtn.style.display = 'none';
                 cleanSystemLogBtn.style.display = 'none';
                 cleanBotLogBtn.style.display = 'inline-flex';
                 saveMdBtn.style.display = 'none';
@@ -2658,6 +2679,7 @@ const html = `<!DOCTYPE html>
             if (activeView === 'editor') {
                 workspaceTitle.textContent = activeMdFile;
                 workspaceIcon.className = 'fa-regular fa-file-lines';
+                refreshSystemLogBtn.style.display = 'none';
                 cleanSystemLogBtn.style.display = 'none';
                 cleanBotLogBtn.style.display = 'none';
                 saveMdBtn.style.display = 'inline-flex';
@@ -2667,6 +2689,7 @@ const html = `<!DOCTYPE html>
             if (activeView === 'schedule') {
                 workspaceTitle.textContent = 'Scheduled Tasks';
                 workspaceIcon.className = 'fa-solid fa-calendar-check';
+                refreshSystemLogBtn.style.display = 'none';
                 cleanSystemLogBtn.style.display = 'none';
                 cleanBotLogBtn.style.display = 'none';
                 saveMdBtn.style.display = 'none';
@@ -2676,6 +2699,7 @@ const html = `<!DOCTYPE html>
             if (activeView === 'token-usage') {
                 workspaceTitle.textContent = 'Token Usage';
                 workspaceIcon.className = 'fa-solid fa-chart-column';
+                refreshSystemLogBtn.style.display = 'none';
                 cleanSystemLogBtn.style.display = 'none';
                 cleanBotLogBtn.style.display = 'none';
                 saveMdBtn.style.display = 'none';
@@ -2685,6 +2709,7 @@ const html = `<!DOCTYPE html>
             const meta = getConversationMeta(activeConversationSource);
             workspaceTitle.textContent = meta.title;
             workspaceIcon.className = meta.icon;
+            refreshSystemLogBtn.style.display = 'inline-flex';
             cleanSystemLogBtn.style.display = 'inline-flex';
             cleanBotLogBtn.style.display = 'none';
             saveMdBtn.style.display = 'none';
@@ -2808,20 +2833,11 @@ const html = `<!DOCTYPE html>
         }
 
         function startSystemLogPolling() {
-            if (systemLogPollTimer) {
-                clearTimeout(systemLogPollTimer);
-            }
-
-            const tick = async () => {
-                if (!isBrowserVisible()) {
-                    systemLogPollTimer = null;
-                    return;
-                }
-                await loadSystemLog();
-                systemLogPollTimer = window.setTimeout(tick, systemLogPollIntervalMs);
-            };
-
-            tick();
+            if (systemLogPollTimer) clearInterval(systemLogPollTimer);
+            systemLogPollTimer = window.setInterval(() => {
+                if (!isBrowserVisible()) return;
+                loadSystemLog();
+            }, systemLogPollIntervalMs);
         }
 
         function startStatusPolling() {
@@ -2842,7 +2858,7 @@ const html = `<!DOCTYPE html>
 
         function stopBackgroundPolling() {
             if (systemLogPollTimer) {
-                clearTimeout(systemLogPollTimer);
+                clearInterval(systemLogPollTimer);
                 systemLogPollTimer = null;
             }
             if (statusPollTimer) {
@@ -3767,6 +3783,10 @@ const html = `<!DOCTYPE html>
         // ── End Schedule ──────────────────────────────────────────────────────
 
         cleanSystemLogBtn.addEventListener('click', () => cleanLog('system'));
+        refreshSystemLogBtn.addEventListener('click', async () => {
+            lastLogText = '';
+            await loadSystemLog();
+        });
         cleanBotLogBtn.addEventListener('click', () => cleanLog('bot'));
         composerSendBtn.addEventListener('click', () => sendComposerMessage());
         composerImageInput.addEventListener('change', async () => {
