@@ -3251,6 +3251,7 @@ const html = `<!DOCTYPE html>
                     period: trendPeriod,
                     groupBy: 'model',
                     tokenType: tokenUsageTokenType.value,
+                    splitPeriods: '1',
                 });
                 if (tokenUsageModelFilter.value) {
                     comparisonParams.set('model', tokenUsageModelFilter.value);
@@ -4167,7 +4168,8 @@ const server = http.createServer((req, res) => {
             const provider = requestUrl.searchParams.get('provider') || '';
             const platform = requestUrl.searchParams.get('platform') || '';
             const tokenType = String(requestUrl.searchParams.get('tokenType') || '').toLowerCase();
-            const summary = getTokenUsageSummary({ period, groupBy, model, provider, platform, tokenType });
+            const splitPeriods = String(requestUrl.searchParams.get('splitPeriods') || '').toLowerCase();
+            const summary = getTokenUsageSummary({ period, groupBy, model, provider, platform, tokenType, splitPeriods });
             sendJson(res, 200, summary);
         } catch (e) {
             sendFailure(res, 500, e.message);

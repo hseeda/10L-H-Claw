@@ -306,18 +306,49 @@ function getSourceBuckets(store, period) {
     return rows;
 }
 
+function getRecentDayRows(store, daysBack) {
+    const rows = [];
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const cutoff = new Date(today);
+    cutoff.setDate(cutoff.getDate() - Math.max(0, daysBack - 1));
+
+    store.models.forEach((record) => {
+        Object.entries(record.periods?.day || {}).forEach(([periodKey, bucket]) => {
+            const bucketDate = new Date(`${periodKey}T00:00:00`);
+            if (Number.isNaN(bucketDate.getTime())) return;
+            if (bucketDate < cutoff || bucketDate > today) return;
+            rows.push({
+                period: periodKey,
+                provider: record.provider,
+                model: record.model,
+                bucket,
+            });
+        });
+    });
+
+    return rows;
+}
+
 function getTokenUsageSummary(options = {}) {
     const period = ['day', 'week', 'month', 'all'].includes(options.period) ? options.period : 'all';
     const groupBy = ['model', 'provider', 'platform', 'period'].includes(options.groupBy) ? options.groupBy : 'model';
     const tokenType = ['input_tokens', 'output_tokens', 'total_tokens', 'cached_tokens', 'reasoning_tokens'].includes(options.tokenType)
         ? options.tokenType
         : null;
+    const splitPeriods = options.splitPeriods === true || options.splitPeriods === '1' || options.splitPeriods === 1;
     const modelFilter = String(options.model || '').trim().toLowerCase();
     const providerFilter = String(options.provider || '').trim().toLowerCase();
     const platformFilter = String(options.platform || '').trim().toLowerCase();
     const store = loadTokenUsageStore();
 
-    const sourceRows = getSourceBuckets(store, period);
+    const sourceRows = period === 'day'
+        ? getRecentDayRows(store, 1)
+        : period === 'week'
+            ? getRecentDayRows(store, 7)
+            : period === 'month'
+                ? getRecentDayRows(store, 30)
+                : getSourceBuckets(store, period);
     const explodedRows = [];
 
     sourceRows.forEach((row) => {
@@ -361,15 +392,20 @@ function getTokenUsageSummary(options = {}) {
 
     const buckets = {};
     explodedRows.forEach((row) => {
-        const bucketKey = groupBy === 'period'
+        const rowGroupKey = groupBy === 'period'
             ? row.period
             : (groupBy === 'provider' ? row.provider : groupBy === 'platform' ? row.platform : row.model);
+        const bucketKey = groupBy === 'period'
+            ? row.period
+            : splitPeriods && period !== 'all'
+                ? `${rowGroupKey}__${row.period}`
+                : rowGroupKey;
         if (!buckets[bucketKey]) {
             buckets[bucketKey] = {
-                period: groupBy === 'period' ? row.period : period,
-                model: groupBy === 'model' ? row.model : row.model,
-                provider: groupBy === 'provider' ? row.provider : row.provider,
-                platform: groupBy === 'platform' ? row.platform : row.platform,
+                period: row.period,
+                model: row.model,
+                provider: row.provider,
+                platform: row.platform,
                 totals: emptyTotals(),
             };
         }
