@@ -499,17 +499,19 @@ async function buildFilteredLog(source) {
     if (source === 'wa') {
         filteredLines = lines.filter((line) => {
             const text = String(line || '');
+            const lowered = text.toLowerCase();
             return text.includes(' WA ')
-                || text.includes('WhatsApp')
+                || lowered.includes('whatsapp')
                 || text.includes('[IPC] Sent WA')
                 || text.includes('[IPC] Failed to send WA')
-                || text.includes('Error fetching WhatsApp history');
+                || lowered.includes('error fetching whatsapp history');
         });
     } else if (source === 'tg') {
         filteredLines = lines.filter((line) => {
             const text = String(line || '');
+            const lowered = text.toLowerCase();
             return text.includes(' TG ')
-                || text.includes('Telegram')
+                || lowered.includes('telegram')
                 || text.includes('[IPC] Sent TG')
                 || text.includes('[IPC] Processed TG')
                 || text.includes('[IPC] Failed to send TG');
