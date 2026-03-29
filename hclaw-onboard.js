@@ -2563,6 +2563,7 @@ const html = `<!DOCTYPE html>
         let _botIsRunning = false;
 
         async function loadStatus() {
+            if (!isBrowserVisible()) return;
             try {
                 const response = await fetch('/api/status');
                 const data = await response.json();
@@ -2729,8 +2730,15 @@ const html = `<!DOCTYPE html>
 
         let systemLogRequestInFlight = null;
         let systemLogPollTimer = null;
+        let statusPollTimer = null;
+        let botLogPollTimer = null;
+
+        function isBrowserVisible() {
+            return document.visibilityState === 'visible' && !document.hidden;
+        }
 
         async function loadSystemLog() {
+            if (!isBrowserVisible()) return;
             if (activeView !== 'system') return;
             if (document.activeElement === systemChatLog) return;
             if (systemLogRequestInFlight) return systemLogRequestInFlight;
@@ -2773,11 +2781,66 @@ const html = `<!DOCTYPE html>
             }
 
             const tick = async () => {
+                if (!isBrowserVisible()) {
+                    systemLogPollTimer = null;
+                    return;
+                }
                 await loadSystemLog();
                 systemLogPollTimer = window.setTimeout(tick, systemLogPollIntervalMs);
             };
 
             tick();
+        }
+
+        function startStatusPolling() {
+            if (statusPollTimer) clearInterval(statusPollTimer);
+            statusPollTimer = window.setInterval(() => {
+                if (!isBrowserVisible()) return;
+                loadStatus();
+            }, systemLogPollIntervalMs);
+        }
+
+        function startBotLogPolling() {
+            if (botLogPollTimer) clearInterval(botLogPollTimer);
+            botLogPollTimer = window.setInterval(() => {
+                if (!isBrowserVisible()) return;
+                loadBotLog();
+            }, systemLogPollIntervalMs);
+        }
+
+        function stopBackgroundPolling() {
+            if (systemLogPollTimer) {
+                clearTimeout(systemLogPollTimer);
+                systemLogPollTimer = null;
+            }
+            if (statusPollTimer) {
+                clearInterval(statusPollTimer);
+                statusPollTimer = null;
+            }
+            if (botLogPollTimer) {
+                clearInterval(botLogPollTimer);
+                botLogPollTimer = null;
+            }
+            _schedRefreshStop();
+        }
+
+        function startBackgroundPolling() {
+            if (!isBrowserVisible()) return;
+            startStatusPolling();
+            startSystemLogPolling();
+            startBotLogPolling();
+            if (activeView === 'schedule') _schedRefreshStart();
+        }
+
+        function handleVisibilityChange() {
+            if (!isBrowserVisible()) {
+                stopBackgroundPolling();
+                return;
+            }
+            startBackgroundPolling();
+            loadStatus();
+            if (activeView === 'system') loadSystemLog();
+            if (activeView === 'bot') loadBotLog();
         }
 
         function setActiveView(view) {
@@ -2797,7 +2860,12 @@ const html = `<!DOCTYPE html>
             botLogPane.setAttribute('aria-hidden', String(!showBot));
             editorPane.setAttribute('aria-hidden', String(!showEditor));
             syncWorkspaceHeader();
-            if (showSchedule) { loadSchedules(); _schedRefreshStart(); } else { _schedRefreshStop(); }
+            if (showSchedule) {
+                loadSchedules();
+                if (isBrowserVisible()) _schedRefreshStart();
+            } else {
+                _schedRefreshStop();
+            }
             if (showTokenUsage) { loadTokenUsageDashboard(); }
             persistUiState();
         }
@@ -2805,7 +2873,7 @@ const html = `<!DOCTYPE html>
         let _schedRefreshTimer = null;
         function _schedRefreshStart() {
             _schedRefreshStop();
-            _schedRefreshTimer = setInterval(loadSchedules, 5000);
+            _schedRefreshTimer = setInterval(loadSchedules, systemLogPollIntervalMs);
         }
         function _schedRefreshStop() {
             if (_schedRefreshTimer) { clearInterval(_schedRefreshTimer); _schedRefreshTimer = null; }
@@ -3247,6 +3315,7 @@ const html = `<!DOCTYPE html>
         }
 
         async function loadBotLog() {
+            if (!isBrowserVisible()) return;
             if (activeView !== 'bot') return;
             if (document.activeElement === botLogViewer) return;
 
@@ -3874,15 +3943,14 @@ const html = `<!DOCTYPE html>
             syncGutterHeights('system');
             syncGutterHeights('bot');
         });
-        window.setInterval(loadStatus, 2000);
-        startSystemLogPolling();
-        window.setInterval(loadBotLog, 1500);
+        document.addEventListener('visibilitychange', handleVisibilityChange);
+        startBackgroundPolling();
         loadComposerHistory();
         renderComposerHistoryList();
         updateComposerAttachmentUi();
         autoResizeComposerMessage();
         restoreSidebarSectionsFromState();
-        loadStatus();
+        if (isBrowserVisible()) loadStatus();
         (async () => {
             await loadMdFileList();
             const restored = await restoreUiState();
@@ -3892,7 +3960,7 @@ const html = `<!DOCTYPE html>
                 await loadSystemLog();
             }
         })();
-        loadBotLog();
+        if (isBrowserVisible()) loadBotLog();
     </script>
 </body>
 </html>
