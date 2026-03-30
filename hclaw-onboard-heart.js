@@ -3776,6 +3776,7 @@ const html = `<!DOCTYPE html>
                         </td>
                         <td style="padding:8px 10px 2px;white-space:nowrap;">
                             <button onclick="editSchedTask('\${escapeHtml(String(t.pid || ''))}')" style="margin-right:6px;padding:3px 10px;border-radius:6px;border:1px solid var(--line-strong);cursor:pointer;font-size:12px;background:var(--bg);color:var(--text);">Edit</button>
+                            <button onclick="triggerSchedTask('\${escapeHtml(String(t.pid || ''))}')" style="margin-right:6px;padding:3px 10px;border-radius:6px;border:1px solid #0d5b48;cursor:pointer;font-size:12px;background:#ecfdf5;color:#0d5b48;">Trigger</button>
                             <button onclick="toggleSchedTask('\${escapeHtml(String(t.pid || ''))}','\${(t.status==='enabled' || t.status==='running')?'disabled':'enabled'}')" style="margin-right:6px;padding:3px 10px;border-radius:6px;border:1px solid var(--line-strong);cursor:pointer;font-size:12px;background:var(--bg);color:var(--text);">\${(t.status==='enabled' || t.status==='running')?'Disable':'Enable'}</button>
                             <button onclick="deleteSchedTask('\${escapeHtml(String(t.pid || ''))}')" style="padding:3px 10px;border-radius:6px;border:1px solid #f87171;cursor:pointer;font-size:12px;background:#fff5f5;color:#dc2626;">Delete</button>
                         </td>
@@ -3798,6 +3799,18 @@ const html = `<!DOCTYPE html>
         window.deleteSchedTask = async function(pid) {
             if (!confirm('Delete task ' + pid + '?')) return;
             await fetch('/api/schedules/' + encodeURIComponent(pid), { method: 'DELETE' });
+            loadSchedules();
+        };
+
+        window.triggerSchedTask = async function(pid) {
+            const response = await fetch('/api/schedules/' + encodeURIComponent(pid) + '/trigger', {
+                method: 'POST'
+            });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok || data.success === false) {
+                alert((data && data.error) || ('Failed to trigger task ' + pid + '.'));
+                return;
+            }
             loadSchedules();
         };
 
@@ -4588,6 +4601,34 @@ const server = http.createServer((req, res) => {
         } catch (e) {
             sendFailure(res, 500, e.message);
         }
+        return;
+    }
+
+    if (pathname.startsWith('/api/schedules/') && pathname.endsWith('/trigger') && method === 'POST') {
+        const parts = pathname.split('/');
+        const pid = decodeURIComponent(parts[3] || '');
+        if (!pid) {
+            sendFailure(res, 400, 'Task pid is required.');
+            return;
+        }
+
+        const triggerPayload = { type: 'trigger_schedule', pid };
+        if (botProcess && botProcess.connected) {
+            botProcess.send(triggerPayload);
+            sendSuccess(res, { mode: 'ipc', pid });
+            return;
+        }
+
+        isBotRunning().then(async (running) => {
+            if (!running) {
+                sendFailure(res, 400, 'H-Claw is not running.');
+                return;
+            }
+            await enqueueBridgeCommand(triggerPayload);
+            sendSuccess(res, { mode: 'bridge', pid });
+        }).catch((error) => {
+            sendFailure(res, 500, error.message || 'Failed to trigger scheduled task.');
+        });
         return;
     }
 

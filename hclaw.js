@@ -40,7 +40,7 @@ if (fs.existsSync(envBotPath)) {
 console.log = oldLog;
 const { initializeWhatsAppClient, isWhatsAppReady, getWhatsAppStatus } = require('./src/whatsappClient');
 const { initializeTelegramClient } = require('./src/telegramClient');
-const { loadScheduledTasks, getSchedulableTasks, markTaskExecuted, updateSchedule, computeFutureOccurrence } = require('./src/scheduleTool');
+const { loadScheduledTasks, getSchedulableTasks, getStoredScheduledTasks, markTaskExecuted, updateSchedule, computeFutureOccurrence } = require('./src/scheduleTool');
 const queueFile = path.join(__dirname, 'tmp', 'onboard_ui_queue.jsonl');
 const pidFile = path.join(__dirname, 'public', 'hclaw.pid');
 let queueReadOffset = 0;
@@ -157,6 +157,23 @@ async function executeScheduledTask(task) {
 
     const response = await generateAIResponse(prompt, false, whatsappClient, injectedHistory, task.issuer_client || 'onboard');
     await deliverScheduledReply(task, response || 'Scheduled task completed.');
+}
+
+async function triggerScheduledTaskByPid(pid) {
+    const taskId = String(pid || '').trim();
+    if (!taskId) {
+        throw new Error('Task pid is required.');
+    }
+
+    loadScheduledTasks(new Date());
+    const tasks = getStoredScheduledTasks();
+    const task = tasks.find((entry) => String(entry.pid) === taskId);
+    if (!task) {
+        throw new Error(`Task ${taskId} not found.`);
+    }
+
+    await executeScheduledTask(task);
+    return task;
 }
 
 async function runSchedulerTick() {
@@ -422,6 +439,8 @@ async function processQueuedCommands() {
                         await handleSendMessage(payload);
                     } else if (payload.type === 'update_settings') {
                         await handleSettingsUpdate(payload.settings);
+                    } else if (payload.type === 'trigger_schedule') {
+                        await triggerScheduledTaskByPid(payload.pid);
                     }
                 } catch (error) {
                     console.error('Queue payload error:', error.message);
@@ -482,5 +501,7 @@ process.on('message', async (msg) => {
         await handleSettingsUpdate(msg.settings);
     } else if (msg.type === 'send_msg') {
         await handleSendMessage(msg);
+    } else if (msg.type === 'trigger_schedule') {
+        await triggerScheduledTaskByPid(msg.pid);
     }
 });
