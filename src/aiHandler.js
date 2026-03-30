@@ -314,11 +314,15 @@ async function generateAIResponse(prompt, isSelf = false, client = null, chatHis
   let provider = model.provider;
   let modelName = model.model;
   const { platformName } = parsePlatformContext(platform);
+  const heartbeatDetected = /_heartbeat_/i.test(String(prompt || ''));
 
   const appendedHistory = '';
 
   try {
     console.log(`${providerEmoji(provider)} ${modelName}`);
+    if (heartbeatDetected) {
+      console.log('💓 [HEARTBEAT] "_heartbeat_" detected in prompt. HEARTBEAT.md injected into system prompt.');
+    }
     //++++++++++++++++++++++++++++++
     if (provider === "gemini") {
       return await getGeminiResponse(modelName, prompt, client, appendedHistory, platform);
