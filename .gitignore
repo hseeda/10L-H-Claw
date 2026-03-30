@@ -13,6 +13,7 @@ MD/TOOLS.md
 heartbeat/
 MD/media/*
 MD/SCHEDULE.md
+MD/HEARTBEAT.md
 *.pid
 secrets/
 *.backup.md
