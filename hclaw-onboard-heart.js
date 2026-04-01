@@ -19,6 +19,8 @@ const HTTPS_ENABLED = String(process.env.ONBOARD_HTTPS || '').trim().toLowerCase
 const HTTPS_KEY_FILE = String(process.env.ONBOARD_HTTPS_KEY || '').trim();
 const HTTPS_CERT_FILE = String(process.env.ONBOARD_HTTPS_CERT || '').trim();
 const HTTPS_CA_FILE = String(process.env.ONBOARD_HTTPS_CA || '').trim();
+const HTTPS_PFX_FILE = String(process.env.ONBOARD_HTTPS_PFX || '').trim();
+const HTTPS_PFX_PASSPHRASE = String(process.env.ONBOARD_HTTPS_PFX_PASSPHRASE || '');
 const ONBOARD_UI_REFRESH_MS = Math.max(500, Number(process.env.ONBOARD_UI_REFRESH_MS) || 5000);
 const logFile = path.join('logs', 'log.txt');
 const botLogFile = path.join('logs', 'bot_log.txt');
@@ -102,8 +104,20 @@ function resolveTlsFilePath(filePath) {
 
 function getHttpsOptions() {
     if (!HTTPS_ENABLED) return null;
+    if (HTTPS_PFX_FILE) {
+        try {
+            return {
+                pfx: fs.readFileSync(resolveTlsFilePath(HTTPS_PFX_FILE)),
+                passphrase: HTTPS_PFX_PASSPHRASE
+            };
+        } catch (error) {
+            console.warn(`[OnBoard] Failed to load HTTPS PFX file: ${error.message}. Falling back to HTTP.`);
+            return null;
+        }
+    }
+
     if (!HTTPS_KEY_FILE || !HTTPS_CERT_FILE) {
-        console.warn('[OnBoard] HTTPS is enabled, but ONBOARD_HTTPS_KEY or ONBOARD_HTTPS_CERT is missing. Falling back to HTTP.');
+        console.warn('[OnBoard] HTTPS is enabled, but neither ONBOARD_HTTPS_PFX nor ONBOARD_HTTPS_KEY/ONBOARD_HTTPS_CERT is fully configured. Falling back to HTTP.');
         return null;
     }
 
