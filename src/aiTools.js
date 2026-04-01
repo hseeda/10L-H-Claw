@@ -12,6 +12,8 @@ const mailManager = require("./mailTools");
 let internalOpenAI = null;
 let geminiToolClient = null;
 let fileManager = null;
+const GEMINI_FILE_READY_TIMEOUT_MS = 120000;
+const GEMINI_FILE_READY_POLL_MS = 1500;
 
 try {
   if (process.env.OPENAI_API_KEY) {
@@ -113,6 +115,54 @@ function parseAttachmentPaths(value) {
     .filter(Boolean);
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function readGeminiFileState(file) {
+  const rawState = file?.state;
+  if (!rawState) return "";
+  if (typeof rawState === "string") return rawState.toUpperCase();
+  if (typeof rawState?.name === "string") return rawState.name.toUpperCase();
+  return String(rawState).toUpperCase();
+}
+
+async function uploadGeminiFileAndWait(filePath, mimeType) {
+  if (!fileManager) {
+    throw new Error("Gemini File Manager not configured.");
+  }
+
+  const uploaded = await fileManager.upload({
+    file: filePath,
+    mimeType,
+  });
+
+  const fileName = uploaded?.name;
+  if (!fileName) {
+    return uploaded;
+  }
+
+  const startedAt = Date.now();
+  let current = uploaded;
+  let currentState = readGeminiFileState(current);
+
+  while (Date.now() - startedAt < GEMINI_FILE_READY_TIMEOUT_MS) {
+    if (!currentState || currentState === "ACTIVE") {
+      return current;
+    }
+
+    if (currentState === "FAILED" || currentState === "ERROR") {
+      throw new Error(`Gemini file processing failed for ${fileName} (state: ${currentState}).`);
+    }
+
+    await sleep(GEMINI_FILE_READY_POLL_MS);
+    current = await fileManager.get({ name: fileName });
+    currentState = readGeminiFileState(current);
+  }
+
+  throw new Error(`Timed out waiting for Gemini file ${fileName} to become ACTIVE. Last state: ${currentState || "UNKNOWN"}.`);
+}
+
 async function analyzeLocalMediaFile(filePath, mimeType = "") {
   if (!filePath || !fs.existsSync(filePath)) {
     return `❌ Local media not found: ${filePath}`;
@@ -158,10 +208,7 @@ async function analyzeLocalMediaFile(filePath, mimeType = "") {
     return "❌ Gemini File Manager not configured.";
   }
 
-  const uploadResult = await fileManager.upload({
-    file: filePath,
-    mimeType: resolvedMimeType,
-  });
+  const uploadResult = await uploadGeminiFileAndWait(filePath, resolvedMimeType);
 
   return `[FILE_URI_ATTACHMENT]
 MimeType: ${resolvedMimeType}
@@ -836,10 +883,7 @@ async function executeTool(name, args, client = null, platform = 'whatsapp') {
       fs.writeFileSync(fp, Buffer.from(media.data, "base64"));
 
       try {
-        const uploadResult = await fileManager.upload({
-          file: fp,
-          mimeType: media.mimetype,
-        });
+        const uploadResult = await uploadGeminiFileAndWait(fp, media.mimetype);
 
         // Clean up temporary file
         fs.unlinkSync(fp);
@@ -1149,10 +1193,7 @@ FileUri: ${uploadResult.uri}`;
             // For images/docs, use Gemini
             if (!fileManager) return "❌ Gemini File Manager not configured.";
             
-            const uploadResult = await fileManager.upload({
-                file: fp,
-                mimeType: mimetype,
-            });
+            const uploadResult = await uploadGeminiFileAndWait(fp, mimetype);
             fs.unlinkSync(fp);
 
             return `📄 [FILE_URI_ATTACHMENT] MimeType: ${mimetype} FileUri: ${uploadResult.uri}`;
