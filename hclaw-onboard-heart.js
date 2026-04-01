@@ -1,6 +1,7 @@
 process.noDeprecation = true;
 
 const http = require('http');
+const https = require('https');
 const fs = require('fs');
 const { fork, exec, execFile } = require('child_process');
 const path = require('path');
@@ -14,6 +15,10 @@ console.log = oldLog;
 
 const PORT = Number(process.env.PORT) || 8081;
 const BIND_HOST = process.env.BIND_HOST || '0.0.0.0';
+const HTTPS_ENABLED = String(process.env.ONBOARD_HTTPS || '').trim().toLowerCase() === 'true';
+const HTTPS_KEY_FILE = String(process.env.ONBOARD_HTTPS_KEY || '').trim();
+const HTTPS_CERT_FILE = String(process.env.ONBOARD_HTTPS_CERT || '').trim();
+const HTTPS_CA_FILE = String(process.env.ONBOARD_HTTPS_CA || '').trim();
 const ONBOARD_UI_REFRESH_MS = Math.max(500, Number(process.env.ONBOARD_UI_REFRESH_MS) || 5000);
 const logFile = path.join('logs', 'log.txt');
 const botLogFile = path.join('logs', 'bot_log.txt');
@@ -88,6 +93,35 @@ function isSecretsPath(filePathParam) {
 
 function getDefaultMemoryContent() {
     return 'MEMORY\n';
+}
+
+function resolveTlsFilePath(filePath) {
+    if (!filePath) return '';
+    return path.isAbsolute(filePath) ? filePath : path.join(__dirname, filePath);
+}
+
+function getHttpsOptions() {
+    if (!HTTPS_ENABLED) return null;
+    if (!HTTPS_KEY_FILE || !HTTPS_CERT_FILE) {
+        console.warn('[OnBoard] HTTPS is enabled, but ONBOARD_HTTPS_KEY or ONBOARD_HTTPS_CERT is missing. Falling back to HTTP.');
+        return null;
+    }
+
+    try {
+        const options = {
+            key: fs.readFileSync(resolveTlsFilePath(HTTPS_KEY_FILE)),
+            cert: fs.readFileSync(resolveTlsFilePath(HTTPS_CERT_FILE))
+        };
+
+        if (HTTPS_CA_FILE) {
+            options.ca = fs.readFileSync(resolveTlsFilePath(HTTPS_CA_FILE));
+        }
+
+        return options;
+    } catch (error) {
+        console.warn(`[OnBoard] Failed to load HTTPS certificate files: ${error.message}. Falling back to HTTP.`);
+        return null;
+    }
 }
 
 async function backupMemoryFile() {
@@ -4341,7 +4375,7 @@ function collectBody(req, res, maxBytes = MAX_POST_BODY) {
     });
 }
 
-const server = http.createServer((req, res) => {
+const requestHandler = (req, res) => {
     const { url, method } = req;
     const requestUrl = new URL(url, 'http://127.0.0.1');
     const pathname = requestUrl.pathname;
@@ -4860,7 +4894,13 @@ const server = http.createServer((req, res) => {
 
     res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
     res.end('Not Found');
-});
+};
+
+const httpsOptions = getHttpsOptions();
+const serverProtocol = httpsOptions ? 'https' : 'http';
+const server = httpsOptions
+    ? https.createServer(httpsOptions, requestHandler)
+    : http.createServer(requestHandler);
 
 server.keepAliveTimeout = 30000;
 server.headersTimeout = 30000;
@@ -4868,7 +4908,7 @@ server.requestTimeout = 30000;
 
 server.on('error', (err) => {
     if (err.code === 'EADDRINUSE') {
-        console.error(`[OnBoard] Port ${PORT} is already in use.`);
+        console.error(`[OnBoard] ${serverProtocol.toUpperCase()} port ${PORT} is already in use.`);
     } else {
         console.error('[OnBoard] Server error:', err.message);
     }
@@ -4890,5 +4930,8 @@ startLiveLogTrimming();
 
 server.listen(PORT, BIND_HOST, () => {
     const displayHost = BIND_HOST === '0.0.0.0' ? 'localhost' : BIND_HOST;
-    console.log(`H-Claw OnBoard UI is live at http://${displayHost}:${PORT}`);
+    console.log(`H-Claw OnBoard UI is live at ${serverProtocol}://${displayHost}:${PORT}`);
+    if (serverProtocol === 'https') {
+        console.log('[OnBoard] HTTPS is enabled.');
+    }
 });
