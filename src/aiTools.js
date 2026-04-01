@@ -173,13 +173,18 @@ async function analyzeLocalMediaFile(filePath, mimeType = "") {
   const { getActiveModel } = require("./Models");
   const activeModelProvider = getActiveModel().provider;
 
-  if (resolvedMimeType.startsWith("audio/") && (activeModelProvider === "openai" || activeModelProvider === "chatgpt")) {
-    if (!internalOpenAI) return "❌ OpenAI (Whisper) not configured.";
-    const transcription = await internalOpenAI.audio.transcriptions.create({
-      file: fs.createReadStream(filePath),
-      model: "whisper-1",
-    });
-    return `🎙️ Local Audio Transcription: "${transcription.text}"`;
+  if (resolvedMimeType.startsWith("audio/")) {
+    if (internalOpenAI) {
+      const transcription = await internalOpenAI.audio.transcriptions.create({
+        file: fs.createReadStream(filePath),
+        model: "whisper-1",
+      });
+      return `🎙️ Local Audio Transcription: "${transcription.text}"`;
+    }
+
+    if (!fileManager || !geminiToolClient) {
+      return "❌ Audio analysis is unavailable. OpenAI (Whisper) and Gemini File Manager are not configured.";
+    }
   }
 
   if (activeModelProvider === "openai" || activeModelProvider === "chatgpt") {
