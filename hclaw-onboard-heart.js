@@ -1,3 +1,5 @@
+process.noDeprecation = true;
+
 const http = require('http');
 const fs = require('fs');
 const { fork, exec, execFile } = require('child_process');
@@ -2721,12 +2723,16 @@ const html = `<!DOCTYPE html>
         }
 
         async function startComposerRecording() {
+            if (typeof window !== 'undefined' && !window.isSecureContext) {
+                setComposerStatus('Microphone recording requires a secure page. Open OnBoard with localhost or HTTPS.', 'error');
+                return;
+            }
             if (typeof navigator === 'undefined' || !navigator.mediaDevices || typeof navigator.mediaDevices.getUserMedia !== 'function') {
-                setComposerStatus('This browser does not support microphone recording.', 'error');
+                setComposerStatus('Microphone access is unavailable here. Try Chrome/Edge/Firefox on localhost or HTTPS.', 'error');
                 return;
             }
             if (typeof MediaRecorder === 'undefined') {
-                setComposerStatus('Audio recording is unavailable in this browser.', 'error');
+                setComposerStatus('This browser can open the page, but it does not support in-browser audio recording.', 'error');
                 return;
             }
 
@@ -2776,7 +2782,16 @@ const html = `<!DOCTYPE html>
                 composerRecordingMimeType = '';
                 composerRecordingStartedAt = 0;
                 updateComposerRecordUi();
-                setComposerStatus('Microphone access was denied or unavailable.', 'error');
+                const errorName = String(error && error.name ? error.name : '');
+                if (errorName === 'NotAllowedError' || errorName === 'PermissionDeniedError') {
+                    setComposerStatus('Microphone permission was denied. Allow mic access in the browser and try again.', 'error');
+                    return;
+                }
+                if (errorName === 'NotFoundError' || errorName === 'DevicesNotFoundError') {
+                    setComposerStatus('No microphone was found on this device.', 'error');
+                    return;
+                }
+                setComposerStatus('Microphone access failed. Check browser permissions and secure-page access.', 'error');
             }
         }
 
