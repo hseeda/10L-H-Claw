@@ -86,6 +86,7 @@ function detectMimeTypeFromPath(filePath) {
   if (ext === ".mp3") return "audio/mpeg";
   if (ext === ".wav") return "audio/wav";
   if (ext === ".ogg" || ext === ".oga") return "audio/ogg";
+  if (ext === ".webm" || ext === ".weba") return "audio/webm";
   if (ext === ".m4a") return "audio/mp4";
   if (ext === ".aac") return "audio/aac";
   if (ext === ".flac") return "audio/flac";

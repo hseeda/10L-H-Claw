@@ -448,7 +448,7 @@ function getSettingsModelLists() {
 
 function sanitizeUploadName(filename) {
     const ext = path.extname(String(filename || '')).toLowerCase();
-    const safeExt = ['.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp', '.mp3', '.wav', '.ogg', '.m4a', '.aac', '.flac'].includes(ext) ? ext : '.bin';
+    const safeExt = ['.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp', '.mp3', '.wav', '.ogg', '.m4a', '.aac', '.flac', '.webm', '.weba'].includes(ext) ? ext : '.bin';
     const base = path.basename(String(filename || 'upload'), ext).replace(/[^a-z0-9_-]/gi, '-').slice(0, 48) || 'upload';
     return `${Date.now()}-${base}${safeExt}`;
 }
@@ -1426,8 +1426,15 @@ const html = `<!DOCTYPE html>
             z-index: 3;
         }
 
+        .composer-panel.overlay-active .record-btn {
+            position: absolute;
+            left: 86px;
+            bottom: 18px;
+            z-index: 3;
+        }
+
         .composer-panel.overlay-active .composer-message {
-            padding-left: 84px;
+            padding-left: 148px;
         }
 
         .composer-panel.overlay-active .send-btn {
@@ -1473,6 +1480,32 @@ const html = `<!DOCTYPE html>
             background: var(--soft-active);
             color: var(--soft-active-text);
             border-color: #bcd8d0;
+        }
+
+        .record-btn {
+            width: 50px;
+            height: 50px;
+            border: 1px solid #f0c2c7;
+            border-radius: 14px;
+            background: #fff7f8;
+            color: #b42318;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 18px;
+            cursor: pointer;
+        }
+
+        .record-btn.recording {
+            background: #b42318;
+            border-color: #b42318;
+            color: #fff;
+            box-shadow: 0 0 0 4px rgba(180, 35, 24, 0.12);
+        }
+
+        .record-btn:disabled {
+            opacity: 0.7;
+            cursor: not-allowed;
         }
 
         .composer-file {
@@ -2046,7 +2079,10 @@ const html = `<!DOCTYPE html>
                                 <label class="attach-btn" for="composer-image" id="composer-image-btn" aria-label="Attach image">
                                     <i class="fa-regular fa-image" aria-hidden="true"></i>
                                 </label>
-                                <input class="composer-file" id="composer-image" type="file" accept="image/*">
+                                <input class="composer-file" id="composer-image" type="file" accept="image/*,audio/*">
+                                <button class="record-btn" id="composer-record-btn" type="button" aria-label="Record audio" title="Record audio">
+                                    <i class="fa-solid fa-microphone" aria-hidden="true"></i>
+                                </button>
                                 <button class="send-btn" id="composer-send-btn" type="button" aria-label="Send message">
                                     <i class="fa-solid fa-arrow-up" aria-hidden="true"></i>
                                 </button>
@@ -2272,6 +2308,7 @@ const html = `<!DOCTYPE html>
         const composerHistoryList = document.getElementById('composer-history-list');
         const composerImageInput = document.getElementById('composer-image');
         const composerImageBtn = document.getElementById('composer-image-btn');
+        const composerRecordBtn = document.getElementById('composer-record-btn');
         const composerAttachmentName = document.getElementById('composer-attachment-name');
         const composerSendBtn = document.getElementById('composer-send-btn');
         const composerHint = document.getElementById('composer-hint');
@@ -2323,6 +2360,11 @@ const html = `<!DOCTYPE html>
         let composerHistoryIndex = -1;
         let composerDraft = '';
         let composerAttachmentPayload = null;
+        let composerRecorder = null;
+        let composerRecordingStream = null;
+        let composerRecordingChunks = [];
+        let composerRecordingMimeType = '';
+        let composerRecordingStartedAt = 0;
         let heartPulseTimer = null;
 
         function pulseWorkspaceHeart() {
@@ -2570,6 +2612,32 @@ const html = `<!DOCTYPE html>
             composerAttachmentName.textContent = hasAttachment ? 'Attached: ' + composerAttachmentPayload.name : '';
         }
 
+        function getComposerAudioExtension(mimeType) {
+            const normalized = String(mimeType || '').toLowerCase();
+            if (normalized.includes('ogg')) return 'ogg';
+            if (normalized.includes('mp4') || normalized.includes('mpeg-4')) return 'm4a';
+            if (normalized.includes('mpeg')) return 'mp3';
+            if (normalized.includes('wav')) return 'wav';
+            if (normalized.includes('webm')) return 'webm';
+            return 'webm';
+        }
+
+        function stopComposerRecordingStream() {
+            if (!composerRecordingStream) return;
+            composerRecordingStream.getTracks().forEach((track) => track.stop());
+            composerRecordingStream = null;
+        }
+
+        function updateComposerRecordUi() {
+            const isRecording = Boolean(composerRecorder && composerRecorder.state === 'recording');
+            composerRecordBtn.classList.toggle('recording', isRecording);
+            composerRecordBtn.setAttribute('aria-label', isRecording ? 'Stop recording' : 'Record audio');
+            composerRecordBtn.setAttribute('title', isRecording ? 'Stop recording' : 'Record audio');
+            composerRecordBtn.innerHTML = isRecording
+                ? '<i class="fa-solid fa-stop" aria-hidden="true"></i>'
+                : '<i class="fa-solid fa-microphone" aria-hidden="true"></i>';
+        }
+
         function clearComposerAttachment() {
             composerAttachmentPayload = null;
             composerImageInput.value = '';
@@ -2613,6 +2681,118 @@ const html = `<!DOCTYPE html>
                 setComposerStatus('Failed to read the selected attachment.', 'error');
                 return false;
             }
+        }
+
+        function getPreferredComposerAudioMimeType() {
+            if (typeof MediaRecorder === 'undefined' || typeof MediaRecorder.isTypeSupported !== 'function') {
+                return '';
+            }
+
+            const candidates = [
+                'audio/webm;codecs=opus',
+                'audio/ogg;codecs=opus',
+                'audio/webm',
+                'audio/ogg'
+            ];
+
+            return candidates.find((candidate) => MediaRecorder.isTypeSupported(candidate)) || '';
+        }
+
+        async function finalizeComposerRecording() {
+            if (!composerRecordingChunks.length) {
+                setComposerStatus('No audio was captured. Try recording again.', 'error');
+                return;
+            }
+
+            const mimeType = composerRecordingMimeType || 'audio/webm';
+            const extension = getComposerAudioExtension(mimeType);
+            const blob = new Blob(composerRecordingChunks, { type: mimeType });
+            const data = await readSelectedAttachment(blob);
+            const elapsedMs = Math.max(0, Date.now() - composerRecordingStartedAt);
+            const seconds = elapsedMs ? Math.max(1, Math.round(elapsedMs / 1000)) : 0;
+
+            composerAttachmentPayload = {
+                name: 'recording-' + Date.now() + '.' + extension,
+                type: mimeType,
+                data
+            };
+            updateComposerAttachmentUi();
+            setComposerStatus('Recorded audio attached' + (seconds ? ' (' + seconds + 's).' : '.'), 'success');
+        }
+
+        async function startComposerRecording() {
+            if (typeof navigator === 'undefined' || !navigator.mediaDevices || typeof navigator.mediaDevices.getUserMedia !== 'function') {
+                setComposerStatus('This browser does not support microphone recording.', 'error');
+                return;
+            }
+            if (typeof MediaRecorder === 'undefined') {
+                setComposerStatus('Audio recording is unavailable in this browser.', 'error');
+                return;
+            }
+
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                const mimeType = getPreferredComposerAudioMimeType();
+                const recorder = mimeType
+                    ? new MediaRecorder(stream, { mimeType })
+                    : new MediaRecorder(stream);
+
+                composerRecordingStream = stream;
+                composerRecorder = recorder;
+                composerRecordingChunks = [];
+                composerRecordingMimeType = recorder.mimeType || mimeType || 'audio/webm';
+                composerRecordingStartedAt = Date.now();
+
+                recorder.addEventListener('dataavailable', (event) => {
+                    if (event.data && event.data.size > 0) {
+                        composerRecordingChunks.push(event.data);
+                    }
+                });
+
+                recorder.addEventListener('stop', async () => {
+                    stopComposerRecordingStream();
+                    updateComposerRecordUi();
+                    try {
+                        await finalizeComposerRecording();
+                    } catch (error) {
+                        clearComposerAttachment();
+                        setComposerStatus('Failed to save the recording.', 'error');
+                    } finally {
+                        composerRecorder = null;
+                        composerRecordingChunks = [];
+                        composerRecordingMimeType = '';
+                        composerRecordingStartedAt = 0;
+                        updateComposerRecordUi();
+                    }
+                });
+
+                recorder.start();
+                updateComposerRecordUi();
+                setComposerStatus('Recording audio... click the mic again to stop.', 'neutral');
+            } catch (error) {
+                stopComposerRecordingStream();
+                composerRecorder = null;
+                composerRecordingChunks = [];
+                composerRecordingMimeType = '';
+                composerRecordingStartedAt = 0;
+                updateComposerRecordUi();
+                setComposerStatus('Microphone access was denied or unavailable.', 'error');
+            }
+        }
+
+        function stopComposerRecording() {
+            if (!composerRecorder || composerRecorder.state !== 'recording') return;
+            composerRecorder.stop();
+            setComposerStatus('Processing recorded audio...', 'neutral');
+        }
+
+        async function toggleComposerRecording() {
+            if (sendInFlight) return;
+            if (composerRecorder && composerRecorder.state === 'recording') {
+                stopComposerRecording();
+                return;
+            }
+            await startComposerRecording();
         }
 
         function setButtonsDisabled(running) {
@@ -3489,6 +3669,10 @@ const html = `<!DOCTYPE html>
 
         async function sendComposerMessage() {
             if (sendInFlight) return;
+            if (composerRecorder && composerRecorder.state === 'recording') {
+                setComposerStatus('Stop the recording before sending.', 'error');
+                return;
+            }
 
             const platform = composerPlatform.value;
             const target = composerTarget.value.trim();
@@ -3888,11 +4072,14 @@ const html = `<!DOCTYPE html>
             const file = composerImageInput.files && composerImageInput.files[0];
             await attachComposerImageFile(file);
         });
+        composerRecordBtn.addEventListener('click', () => {
+            toggleComposerRecording();
+        });
         composerImageBtn.addEventListener('contextmenu', (event) => {
-            if (!composerImagePayload) return;
+            if (!composerAttachmentPayload) return;
             event.preventDefault();
             clearComposerAttachment();
-            setComposerStatus('Image attachment cleared.', 'neutral');
+            setComposerStatus('Attachment cleared.', 'neutral');
         });
         composerText.addEventListener('paste', async (event) => {
             const clipboardItems = Array.from((event.clipboardData && event.clipboardData.items) || []);
@@ -4096,6 +4283,7 @@ const html = `<!DOCTYPE html>
         loadComposerHistory();
         renderComposerHistoryList();
         updateComposerAttachmentUi();
+        updateComposerRecordUi();
         autoResizeComposerMessage();
         restoreSidebarSectionsFromState();
         if (isBrowserVisible()) loadStatus();
@@ -4495,7 +4683,7 @@ const server = http.createServer((req, res) => {
                 sendJson(res, 200, { success: true, isImage: true, isAudio: false, wholePreview: false, content: `data:${mime};base64,${base64}`, path: fileParam });
             } else if (isAudio) {
                 const base64 = data.toString('base64');
-                const mimeMap = { '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.ogg': 'audio/ogg', '.m4a': 'audio/mp4' };
+                const mimeMap = { '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.ogg': 'audio/ogg', '.m4a': 'audio/mp4', '.webm': 'audio/webm', '.weba': 'audio/webm' };
                 const mime = mimeMap[ext] || 'audio/mpeg';
                 sendJson(res, 200, { success: true, isDirectory: false, isImage: false, isAudio: true, wholePreview: false, content: `data:${mime};base64,${base64}`, path: fileParam });
             } else {
