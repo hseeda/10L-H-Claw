@@ -2849,6 +2849,7 @@ const html = `<!DOCTYPE html>
         let systemLogPollTimer = null;
         let statusPollTimer = null;
         let botLogPollTimer = null;
+        let systemLogRefreshBurstTimers = [];
 
         function isBrowserVisible() {
             return document.visibilityState === 'visible' && !document.hidden;
@@ -2911,6 +2912,19 @@ const html = `<!DOCTYPE html>
             systemLogRequestInFlight = requestPromise;
 
             return systemLogRequestInFlight;
+        }
+
+        function clearSystemLogRefreshBurst() {
+            systemLogRefreshBurstTimers.forEach((timerId) => clearTimeout(timerId));
+            systemLogRefreshBurstTimers = [];
+        }
+
+        function scheduleSystemLogRefreshBurst(delays) {
+            clearSystemLogRefreshBurst();
+            const sequence = Array.isArray(delays) && delays.length ? delays : [250, 1000, 2500];
+            systemLogRefreshBurstTimers = sequence.map((delay) => window.setTimeout(() => {
+                loadSystemLog();
+            }, delay));
         }
 
         function startSystemLogPolling() {
@@ -3536,6 +3550,11 @@ const html = `<!DOCTYPE html>
                 if (platform === 'onboard') {
                     lastLogText = '';
                     await loadSystemLog();
+                    if (result.mode === 'bridge') {
+                        scheduleSystemLogRefreshBurst([300, 1200, 3000, 5000]);
+                    } else {
+                        clearSystemLogRefreshBurst();
+                    }
                 }
             } catch (error) {
                 autoResizeComposerMessage();
