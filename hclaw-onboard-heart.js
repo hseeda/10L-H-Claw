@@ -1,7 +1,6 @@
 process.noDeprecation = true;
 
 const http = require('http');
-const https = require('https');
 const fs = require('fs');
 const { fork, exec, execFile } = require('child_process');
 const path = require('path');
@@ -15,12 +14,6 @@ console.log = oldLog;
 
 const PORT = Number(process.env.PORT) || 8081;
 const BIND_HOST = process.env.BIND_HOST || '0.0.0.0';
-const HTTPS_ENABLED = String(process.env.ONBOARD_HTTPS || '').trim().toLowerCase() === 'true';
-const HTTPS_KEY_FILE = String(process.env.ONBOARD_HTTPS_KEY || '').trim();
-const HTTPS_CERT_FILE = String(process.env.ONBOARD_HTTPS_CERT || '').trim();
-const HTTPS_CA_FILE = String(process.env.ONBOARD_HTTPS_CA || '').trim();
-const HTTPS_PFX_FILE = String(process.env.ONBOARD_HTTPS_PFX || '').trim();
-const HTTPS_PFX_PASSPHRASE = String(process.env.ONBOARD_HTTPS_PFX_PASSPHRASE || '');
 const ONBOARD_UI_REFRESH_MS = Math.max(500, Number(process.env.ONBOARD_UI_REFRESH_MS) || 5000);
 const logFile = path.join('logs', 'log.txt');
 const botLogFile = path.join('logs', 'bot_log.txt');
@@ -95,47 +88,6 @@ function isSecretsPath(filePathParam) {
 
 function getDefaultMemoryContent() {
     return 'MEMORY\n';
-}
-
-function resolveTlsFilePath(filePath) {
-    if (!filePath) return '';
-    return path.isAbsolute(filePath) ? filePath : path.join(__dirname, filePath);
-}
-
-function getHttpsOptions() {
-    if (!HTTPS_ENABLED) return null;
-    if (HTTPS_PFX_FILE) {
-        try {
-            return {
-                pfx: fs.readFileSync(resolveTlsFilePath(HTTPS_PFX_FILE)),
-                passphrase: HTTPS_PFX_PASSPHRASE
-            };
-        } catch (error) {
-            console.warn(`[OnBoard] Failed to load HTTPS PFX file: ${error.message}. Falling back to HTTP.`);
-            return null;
-        }
-    }
-
-    if (!HTTPS_KEY_FILE || !HTTPS_CERT_FILE) {
-        console.warn('[OnBoard] HTTPS is enabled, but neither ONBOARD_HTTPS_PFX nor ONBOARD_HTTPS_KEY/ONBOARD_HTTPS_CERT is fully configured. Falling back to HTTP.');
-        return null;
-    }
-
-    try {
-        const options = {
-            key: fs.readFileSync(resolveTlsFilePath(HTTPS_KEY_FILE)),
-            cert: fs.readFileSync(resolveTlsFilePath(HTTPS_CERT_FILE))
-        };
-
-        if (HTTPS_CA_FILE) {
-            options.ca = fs.readFileSync(resolveTlsFilePath(HTTPS_CA_FILE));
-        }
-
-        return options;
-    } catch (error) {
-        console.warn(`[OnBoard] Failed to load HTTPS certificate files: ${error.message}. Falling back to HTTP.`);
-        return null;
-    }
 }
 
 async function backupMemoryFile() {
@@ -4929,11 +4881,8 @@ const requestHandler = (req, res) => {
     res.end('Not Found');
 };
 
-const httpsOptions = getHttpsOptions();
-const serverProtocol = httpsOptions ? 'https' : 'http';
-const server = httpsOptions
-    ? https.createServer(httpsOptions, requestHandler)
-    : http.createServer(requestHandler);
+const serverProtocol = 'http';
+const server = http.createServer(requestHandler);
 
 server.keepAliveTimeout = 30000;
 server.headersTimeout = 30000;
@@ -4964,7 +4913,4 @@ startLiveLogTrimming();
 server.listen(PORT, BIND_HOST, () => {
     const displayHost = BIND_HOST === '0.0.0.0' ? 'localhost' : BIND_HOST;
     console.log(`H-Claw OnBoard UI is live at ${serverProtocol}://${displayHost}:${PORT}`);
-    if (serverProtocol === 'https') {
-        console.log('[OnBoard] HTTPS is enabled.');
-    }
 });
