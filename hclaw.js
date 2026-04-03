@@ -1,3 +1,5 @@
+process.noDeprecation = true;
+
 require("dns").setDefaultResultOrder("ipv4first");
 const path = require('path');
 const fs = require('fs');
@@ -317,7 +319,15 @@ async function handleSendMessage(msg) {
     const { getWhatsappClient, MessageMedia } = require('./src/whatsappClient');
     const { isTelegramActive, sendTelegramMedia } = require('./src/telegramClient');
     const { appendBotLog } = require('./src/loggerTool');
-    const { platform, target, text, image_path: imagePath, history_limit: historyLimit } = msg;
+    const {
+        platform,
+        target,
+        text,
+        image_path: imagePath,
+        media_path: mediaPath,
+        history_limit: historyLimit
+    } = msg;
+    const attachedMediaPath = mediaPath || imagePath;
     const cleanedText = typeof text === 'string' ? text.trim() : '';
     const lowerText = cleanedText.toLowerCase();
 
@@ -327,7 +337,8 @@ async function handleSendMessage(msg) {
                 type: 'send_msg',
                 platform,
                 text,
-                image_path: imagePath,
+                image_path: attachedMediaPath,
+                media_path: attachedMediaPath,
                 history_limit: historyLimit
             }, whatsappClient);
             return;
@@ -345,14 +356,14 @@ async function handleSendMessage(msg) {
                     if (!waId.includes('@')) {
                         waId = waId.includes('-') ? `${waId}@g.us` : `${waId}@c.us`;
                     }
-                    if (imagePath) {
-                        const media = MessageMedia.fromFilePath(imagePath);
+                    if (attachedMediaPath) {
+                        const media = MessageMedia.fromFilePath(attachedMediaPath);
                         await client.sendMessage(waId, media, cleanedText ? { caption: text } : undefined);
                     } else {
                         await client.sendMessage(waId, text);
                     }
                     if (
-                        (cleanedText || imagePath) &&
+                        (cleanedText || attachedMediaPath) &&
                         waId !== selfChatId &&
                         !lowerText.includes('h-claw started!') &&
                         !lowerText.includes('h-claw stopped!') &&
@@ -376,10 +387,10 @@ async function handleSendMessage(msg) {
                 return;
             }
             if (isTelegramActive()) {
-                if (imagePath) {
-                    await sendTelegramMedia(tgId, imagePath, cleanedText);
+                if (attachedMediaPath) {
+                    await sendTelegramMedia(tgId, attachedMediaPath, cleanedText);
                     if (
-                        (cleanedText || imagePath) &&
+                        (cleanedText || attachedMediaPath) &&
                         !lowerText.includes('h-claw started!') &&
                         !lowerText.includes('h-claw stopped!') &&
                         lowerText !== '/stop' &&
@@ -398,9 +409,9 @@ async function handleSendMessage(msg) {
     } catch (e) {
         console.error(`❌ [IPC] Failed to send message:`, e.message);
     } finally {
-        if (imagePath && platform !== 'onboard' && fs.existsSync(imagePath)) {
+        if (attachedMediaPath && platform !== 'onboard' && fs.existsSync(attachedMediaPath)) {
             try {
-                fs.unlinkSync(imagePath);
+                fs.unlinkSync(attachedMediaPath);
             } catch (cleanupError) {
             }
         }

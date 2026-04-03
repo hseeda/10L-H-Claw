@@ -51,6 +51,10 @@ function getWhatsAppStatus() {
         return 'WhatsApp status: DISCONNECTED. The WhatsApp client is not currently connected.';
     }
 
+    if (info.status === 'launch_failed') {
+        return 'WhatsApp status: LAUNCH_FAILED. The WhatsApp browser session could not start. Another process may already be using .wwebjs_auth/session.';
+    }
+
     return `WhatsApp status: ${String(info.status || 'unknown').toUpperCase()}.`;
 }
 
@@ -480,7 +484,17 @@ function initializeWhatsAppClient() {
         }
     });
 
-    client.initialize();
+    client.initialize().catch((error) => {
+        whatsappRuntimeStatus = 'launch_failed';
+
+        const message = String(error && error.message ? error.message : error);
+        if (message.includes('The browser is already running for')) {
+            console.error('⚠️ WhatsApp launch blocked: another browser process is already using the saved session directory (.wwebjs_auth/session). Stop the other H-Claw/Chromium process or remove the stale lock, then try again.');
+            return;
+        }
+
+        console.error('❌ WhatsApp client failed to initialize:', message);
+    });
     return client;
 }
 

@@ -1,3 +1,5 @@
+process.noDeprecation = true;
+
 const http = require('http');
 const fs = require('fs');
 const { fork, exec, execFile } = require('child_process');
